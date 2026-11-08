@@ -1,0 +1,18 @@
+# /etc/systemd/system/sms.service
+[Unit]
+Description=School Management System
+After=network.target
+
+[Service]
+User=sms
+Group=sms
+WorkingDirectory=/opt/sms
+EnvironmentFile=/opt/sms/.env
+Environment=PORT=8000 HOST=127.0.0.1
+ExecStart=/opt/sms/venv/bin/python run.py
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

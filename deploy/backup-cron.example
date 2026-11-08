@@ -1,0 +1,3 @@
+# Daily off-site copy of the newest backup (the app already makes one automatically each day).
+# /etc/cron.d/sms-offsite
+30 2 * * * sms rsync -a --delete /var/lib/sms/backups/ backup-host:/srv/backups/sms/
