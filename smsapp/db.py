@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-from flask import current_app, g
+from flask import g
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
@@ -21,7 +21,9 @@ def connect(path: str) -> sqlite3.Connection:
 
 def get_db() -> sqlite3.Connection:
     if "db" not in g:
-        g.db = connect(current_app.config["DATABASE_PATH"])
+        from .tenancy import db_path
+
+        g.db = connect(db_path())
     return g.db
 
 

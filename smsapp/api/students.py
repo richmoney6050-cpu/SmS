@@ -6,7 +6,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request, send_file
 from PIL import Image, UnidentifiedImageError
 
-from .. import calc
+from .. import tenancy, calc
 from ..audit import audit
 from ..db import execute, insert, marks, row, rows, scalar, tx
 from ..security import current_user, require, require_class, require_student, scope_sql
@@ -288,7 +288,7 @@ def delete_student(sid):
 
 # ------------------------------------------------------------------ photos
 def _photo_dir() -> Path:
-    p = Path(current_app.config["UPLOAD_DIR"]) / "students"
+    p = tenancy.upload_dir() / "students"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

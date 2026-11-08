@@ -45,8 +45,14 @@ def password_problems(password: str, username: str = "") -> list[str]:
         problems.append("at least 10 characters")
     if len(password) > 128:
         problems.append("no more than 128 characters")
-    if not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
-        problems.append("both letters and numbers")
+    if not any(c.isupper() for c in password):
+        problems.append("an uppercase letter")
+    if not any(c.islower() for c in password):
+        problems.append("a lowercase letter")
+    if not any(c.isdigit() for c in password):
+        problems.append("a number")
+    if not any(not c.isalnum() and not c.isspace() for c in password):
+        problems.append("a symbol such as ! # $ %")
     if username and len(username) >= 3 and username.lower() in password.lower():
         problems.append("must not contain the username")
     if password.lower() in _COMMON:
@@ -119,8 +125,10 @@ def current_user(optional: bool = True):
     """Load the signed-in user (cached for the request) or None."""
     if "_user" in g:
         return g._user
+    from .tenancy import current_school
+
     user = None
-    uid = session.get("uid")
+    uid = session.get("uid") if current_school() else None
     if uid:
         rec = row(
             "SELECT u.id, u.username, u.full_name, u.email, u.is_active, u.must_change_password, "

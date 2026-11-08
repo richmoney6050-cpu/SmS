@@ -7,7 +7,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request, send_file
 from PIL import Image, UnidentifiedImageError
 
-from .. import backup as backup_mod
+from .. import tenancy, backup as backup_mod
 from .. import settings
 from ..audit import audit
 from ..db import execute, insert, marks, row, rows, scalar, tx
@@ -549,7 +549,7 @@ def put_settings():
 
 
 def _branding_dir() -> Path:
-    p = Path(current_app.config["UPLOAD_DIR"]) / "branding"
+    p = tenancy.upload_dir() / "branding"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -627,17 +627,17 @@ def audit_log():
 @bp.get("/backups")
 @require("backups.manage")
 def backups_list():
-    return jsonify({"backups": backup_mod.list_backups(current_app.config["BACKUP_DIR"]),
+    return jsonify({"backups": backup_mod.list_backups(str(tenancy.backup_dir())),
                     "auto": current_app.config["AUTO_BACKUP"], "keep": current_app.config["BACKUP_KEEP"]})
 
 
 @bp.post("/backups")
 @require("backups.manage")
 def backups_create():
-    path = backup_mod.create_backup(current_app.config["DATABASE_PATH"], current_app.config["BACKUP_DIR"], current_app.config["BACKUP_KEEP"])
+    path = backup_mod.create_backup(tenancy.db_path(), str(tenancy.backup_dir()), current_app.config["BACKUP_KEEP"])
     with tx():
         audit("backup.create", "backup", path.name)
-    return jsonify({"backups": backup_mod.list_backups(current_app.config["BACKUP_DIR"])}), 201
+    return jsonify({"backups": backup_mod.list_backups(str(tenancy.backup_dir()))}), 201
 
 
 @bp.get("/backups/<name>/download")
@@ -645,7 +645,7 @@ def backups_create():
 def backups_download(name):
     if not backup_mod.NAME_RE.match(name):
         raise ApiError(404, "Backup not found.")
-    path = Path(current_app.config["BACKUP_DIR"]) / name
+    path = tenancy.backup_dir() / name
     if not path.exists():
         raise ApiError(404, "Backup not found.")
     with tx():

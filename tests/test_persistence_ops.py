@@ -35,6 +35,7 @@ def test_backup_path_traversal_blocked(admin):
 def test_demo_seed_labelled_and_purged_cleanly(app, admin):
     from smsapp import demo
     with app.app_context():
+        from smsapp import tenancy; tenancy.use_school(1)
         demo.seed()
     st = admin.get("/api/demo/status").j
     assert st["present"] is True
@@ -51,6 +52,7 @@ def test_demo_refuses_real_data(app, admin, school):
     from smsapp.util import ApiError
     import pytest
     with app.app_context(), pytest.raises(ApiError):
+        from smsapp import tenancy; tenancy.use_school(1)
         demo.seed()
 
 

@@ -5,6 +5,7 @@ import string
 
 from flask import Blueprint, jsonify
 
+from .. import tenancy
 from ..audit import audit
 from ..db import execute, insert, row, rows, scalar, tx
 from ..perms import ALL_CODES, PERMISSIONS
@@ -17,10 +18,11 @@ USERNAME_RE = r"[A-Za-z0-9._-]{3,40}"
 
 
 def generate_password(n: int = 12) -> str:
-    alphabet = string.ascii_letters + string.digits
+    alphabet = string.ascii_letters + string.digits + "!#$%&*?"
     while True:
         pw = "".join(secrets.choice(alphabet) for _ in range(n))
-        if any(c.islower() for c in pw) and any(c.isupper() for c in pw) and any(c.isdigit() for c in pw):
+        if (any(c.islower() for c in pw) and any(c.isupper() for c in pw) and any(c.isdigit() for c in pw)
+                and any(c in "!#$%&*?" for c in pw)):
             return pw
 
 
@@ -69,7 +71,7 @@ def create_user():
     actor = current_user()
     d = body()
     v = (
-        V(d).str("username", "Username", pattern=USERNAME_RE, pattern_msg="3-40 letters, numbers, dots, dashes or underscores.")
+        V(d).str("username", "Username", required=False, pattern=USERNAME_RE, pattern_msg="3-40 letters, numbers, dots, dashes or underscores.")
         .str("full_name", "Full name", min_len=2, max_len=120)
         .str("email", "Email", required=False, max_len=160, pattern=r"[^@\s]+@[^@\s]+\.[^@\s]+", pattern_msg="Enter a valid email address.")
         .int("role_id", "Role")
@@ -82,7 +84,10 @@ def create_user():
     if role is None:
         raise ApiError(422, "Choose a valid role.", fields={"role_id": "Unknown role."})
     _guard_super_admin(actor, role["name"])
-    if scalar("SELECT 1 FROM users WHERE username=?", (data["username"],)):
+    generated_username = not data["username"]
+    if generated_username:
+        data["username"] = tenancy.suggest_username(data["full_name"])
+    elif tenancy.username_taken(data["username"]):
         raise ApiError(409, "That username is already taken.", fields={"username": "Already taken."})
     provided = d.get("password")
     password = str(provided) if provided else generate_password()
@@ -91,14 +96,27 @@ def create_user():
     staff_id = data["staff_id"] or (_next_staff_id() if wants_profile else None)
     if staff_id and scalar("SELECT 1 FROM teachers WHERE staff_id=?", (staff_id,)):
         raise ApiError(409, "That Teacher ID is already in use.", fields={"staff_id": "Already in use."})
-    with tx():
-        uid = insert(
-            "INSERT INTO users(username, full_name, email, password_hash, role_id, must_change_password) VALUES (?,?,?,?,?,1)",
-            (data["username"], data["full_name"], data["email"], hash_password(password), role["id"]),
-        )
-        if wants_profile:
-            insert("INSERT INTO teachers(user_id, staff_id, phone) VALUES (?,?,?)", (uid, staff_id, data["phone"]))
-        audit("user.create", "user", uid, {"username": data["username"], "role": role["name"]})
+    school_id = tenancy.require_school()["id"]
+    for attempt in range(5):
+        try:
+            tenancy.index_user(data["username"], school_id)
+            break
+        except ApiError:
+            if not generated_username:
+                raise
+            data["username"] = tenancy.suggest_username(data["full_name"])
+    try:
+        with tx():
+            uid = insert(
+                "INSERT INTO users(username, full_name, email, password_hash, role_id, must_change_password) VALUES (?,?,?,?,?,1)",
+                (data["username"], data["full_name"], data["email"], hash_password(password), role["id"]),
+            )
+            if wants_profile:
+                insert("INSERT INTO teachers(user_id, staff_id, phone) VALUES (?,?,?)", (uid, staff_id, data["phone"]))
+            audit("user.create", "user", uid, {"username": data["username"], "role": role["name"]})
+    except BaseException:
+        tenancy.unindex_user(data["username"])
+        raise
     out = _user_rows("WHERE u.id=?", (uid,))[0]
     return jsonify({"user": out, "temporary_password": None if provided else password}), 201
 

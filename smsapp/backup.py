@@ -82,20 +82,29 @@ def maybe_auto_backup(app) -> None:
     if now - _last_check < 60:
         return
     _last_check = now
-    backups = list_backups(app.config["BACKUP_DIR"])
-    if backups:
-        newest = datetime.strptime(backups[0]["created_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        if (datetime.now(timezone.utc) - newest).total_seconds() < 24 * 3600:
-            return
-    if not _lock.acquire(blocking=False):
+    from .tenancy import all_schools
+
+    with app.app_context():
+        schools = all_schools()
+    due = []
+    for sch in schools:
+        backups = list_backups(sch["backup_dir"])
+        if backups:
+            newest = datetime.strptime(backups[0]["created_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - newest).total_seconds() < 24 * 3600:
+                continue
+        due.append(sch)
+    if not due or not _lock.acquire(blocking=False):
         return
 
     def work():
         try:
-            create_backup(app.config["DATABASE_PATH"], app.config["BACKUP_DIR"], app.config["BACKUP_KEEP"])
-            app.logger.info("Automatic daily backup created")
-        except Exception:
-            app.logger.exception("Automatic backup failed")
+            for sch in due:
+                try:
+                    create_backup(sch["db_path"], sch["backup_dir"], app.config["BACKUP_KEEP"])
+                    app.logger.info("Automatic daily backup created for school %s", sch["id"])
+                except Exception:
+                    app.logger.exception("Automatic backup failed for school %s", sch["id"])
         finally:
             _lock.release()
 

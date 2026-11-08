@@ -12,7 +12,6 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from . import backup as backup_mod
 from . import db as dbm
 from .config import build_config
-from .perms import sync_catalog
 from .security import check_csrf, check_origin, current_user, ensure_csrf
 from .util import ApiError
 
@@ -39,14 +38,13 @@ def create_app(overrides: dict | None = None) -> Flask:
         Path(cfg[key]).mkdir(parents=True, exist_ok=True)
     _setup_logging(app)
 
-    # Bring the schema and permission catalogue up to date at start-up.
-    conn = dbm.connect(cfg["DATABASE_PATH"])
-    try:
-        applied = dbm.migrate(conn)
-    finally:
-        conn.close()
+    # Bring every school's schema and the permission catalogue up to date at start-up.
+    from . import tenancy
+
     with app.app_context():
-        sync_catalog()
+        tenancy.init_master()
+        tenancy.adopt_legacy(app)
+        applied = tenancy.migrate_all(app)
     if applied:
         app.logger.info("Applied migrations: %s", ", ".join(applied))
 
@@ -128,7 +126,10 @@ def create_app(overrides: dict | None = None) -> Flask:
 
     @app.get("/healthz")
     def healthz():
-        dbm.get_db().execute("SELECT 1").fetchone()
+        from . import tenancy
+
+        with tenancy.master() as m:
+            m.execute("SELECT 1").fetchone()
         return jsonify({"status": "ok"})
 
     return app

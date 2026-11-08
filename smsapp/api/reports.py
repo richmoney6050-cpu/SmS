@@ -5,7 +5,7 @@ from pathlib import Path
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
-from .. import calc, monitor, settings
+from .. import tenancy, calc, monitor, settings
 from ..audit import audit
 from ..db import execute, marks, row, rows, scalar, tx
 from ..pdfgen import render_pdf
@@ -52,7 +52,7 @@ def _pct(v):
 def _respond(doc: dict, filename: str):
     if request.args.get("format") == "pdf":
         logo = settings.get_raw("logo_file")
-        logo_path = str(Path(current_app.config["UPLOAD_DIR"]) / "branding" / Path(logo).name) if logo else None
+        logo_path = str(tenancy.upload_dir() / "branding" / Path(logo).name) if logo else None
         data = render_pdf(doc, logo_path)
         with tx():
             audit("report.pdf", doc["kind"], None, {"title": doc["title"]})

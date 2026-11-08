@@ -8,7 +8,7 @@ import json
 import random
 from datetime import datetime, time, timedelta, timezone
 
-from . import settings
+from . import settings, tenancy
 from .db import execute, insert, marks, row, rows, scalar, tx
 from .security import hash_password
 from .util import ApiError, last_school_days, school_tz, today
@@ -72,6 +72,9 @@ def seed(force: bool = False) -> dict:
     rnd = random.Random(2026)
     d0 = today()
     year = d0.year if d0.month >= 9 else d0.year - 1
+    taken = [u for u in ['headteacher'] + [t[1] for t in TEACHERS] if tenancy.username_taken(u)]
+    if taken:
+        raise ApiError(409, 'Demonstration logins are already used by another school. Demonstration data can only be added to one school.')
     with tx():
         # ---- academic calendar: previous year (closed) and the current year
         py = insert("INSERT INTO academic_years(name,start_date,end_date,is_current,is_demo) VALUES (?,?,?,0,1)", (f"{year - 1}/{year}", f"{year - 1}-09-01", f"{year}-08-31"))
@@ -96,6 +99,9 @@ def seed(force: bool = False) -> dict:
         pw = hash_password(DEMO_PASSWORD)
         head_role = scalar("SELECT id FROM roles WHERE name='headteacher'")
         teach_role = scalar("SELECT id FROM roles WHERE name='teacher'")
+        _sid = tenancy.require_school()["id"]
+        for _u in ["headteacher"] + [t[1] for t in TEACHERS]:
+            tenancy.index_user(_u, _sid)
         insert("INSERT INTO users(username, full_name, email, password_hash, role_id, is_demo) VALUES (?,?,?,?,?,1)", ("headteacher", "Mrs Comfort Ankrah (Headteacher)", None, pw, head_role))
         tid, uid = {}, {}
         for i, (name, uname, _ct, _subs) in enumerate(TEACHERS, start=1):
@@ -233,6 +239,8 @@ def purge() -> dict:
         "classes": scalar("SELECT COUNT(*) FROM classes WHERE is_demo=1", default=0),
         "examinations": scalar("SELECT COUNT(*) FROM examinations WHERE is_demo=1", default=0),
     }
+    for r in rows("SELECT username FROM users WHERE is_demo=1"):
+        tenancy.unindex_user(r["username"])
     with tx():
         execute("DELETE FROM students WHERE is_demo=1")  # cascades attendance, class history, marks, comments
         execute("DELETE FROM examinations WHERE is_demo=1")
