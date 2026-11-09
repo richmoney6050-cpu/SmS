@@ -229,3 +229,17 @@ def test_report_exports_xlsx_for_existing_reports(admin, school):
     r = admin.get(f"/api/reports/class/{school['class']['A']}", format="xlsx")
     assert r.status_code == 200 and r.data[:2] == b"PK"
     assert admin.get(f"/api/reports/class/{school['class']['A']}", format="csv").status_code == 200
+
+
+def test_command_centre_cards_and_class_drilldown(admin, school):
+    eid = create_exam(admin, school)
+    fill_marks(admin, school, eid)
+    st = admin.get("/api/command/overview").j["stats"]
+    assert st["students"] == 4 and st["boys"] == 2 and st["girls"] == 2 and st["teachers"] == 2 and st["classes"] == 2
+    assert "term_attendance_rate" in st and "academic_average" in st
+    c = admin.get(f"/api/command/classes/{school['class']['A']}").j
+    assert c["composition"] == {"girls": 2, "boys": 2}
+    assert len(c["best_students"]) >= 1 and c["best_students"][0]["position"] == "1st"
+    assert [x["name"] for x in c["needs_improvement"]] == [] or all(x["average"] < 50 for x in c["needs_improvement"])
+    assert c["register"]["class_term"]["students"] == 4
+    assert school["tA"].get("/api/command/overview").status_code == 403

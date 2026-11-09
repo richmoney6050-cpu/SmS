@@ -3,11 +3,11 @@ from datetime import timedelta
 
 from flask import Blueprint, jsonify, request
 
-from .. import alerts, calc, monitor, settings
+from .. import alerts, calc, monitor, register as reg, settings
 from ..audit import RECORD_ACTIONS, describe_activity
 from ..db import execute, marks, row, rows, scalar, tx
 from ..security import current_user, require, require_class, visible_class_ids
-from ..util import ApiError, arg_date, arg_int, is_school_day, last_school_days, parse_date, today, utcnow_iso
+from ..util import ApiError, arg_date, arg_int, is_school_day, last_school_days, ordinal, parse_date, today, utcnow_iso
 from .attendance import analysis, resolve_period
 from .exams import results_payload
 
@@ -89,6 +89,9 @@ def overview():
         "date": d.isoformat(), "is_school_day": school_day,
         "stats": {
             "students": registered,
+            "boys": scalar(_gender_sql(ids, "male"), _gender_args(ids), 0),
+            "girls": scalar(_gender_sql(ids, "female"), _gender_args(ids), 0),
+            "term_attendance_rate": _term_rate(ids),
             "teachers": len(active_teachers),
             "classes": len(cards),
             "present_today": present, "late_today": late, "absent_today": absent,
@@ -115,6 +118,26 @@ def overview():
         "activity": _activity_items("1=1" if ids is None else (f"l.class_id IN ({marks(len(ids))})" if ids else "0=1"), ids or [], limit=8),
         "refresh_seconds": settings.get("auto_refresh_seconds"),
     })
+
+
+def _gender_sql(ids, gender):
+    where = "a.is_current=1 AND s.status='active' AND s.gender='%s'" % gender
+    if ids is not None:
+        where += f" AND a.class_id IN ({marks(len(ids))})" if ids else " AND 0=1"
+    return f"SELECT COUNT(*) FROM student_class_assignments a JOIN students s ON s.id=a.student_id WHERE {where}"
+
+
+def _gender_args(ids):
+    return list(ids or [])
+
+
+def _term_rate(ids):
+    try:
+        term = reg.resolve_term()
+    except ApiError:
+        return None
+    m = reg.monitor(term, ids)
+    return m["school"]["percent"]
 
 
 # ------------------------------------------------------------------ B. class monitoring
@@ -209,7 +232,21 @@ def class_view(cid):
                 missing = s["expected"] - s["assessed"]
                 gaps.append({"type": "marks_pending", "text": f"{s['subject_name']}: marks not submitted" + (f" ({missing} student(s) missing marks)." if missing else "."),
                              "subject_id": s["subject_id"]})
+    try:
+        rb = reg.build(cid, reg.resolve_term())
+        register = {"term": rb["term"], "class_term": rb["class_term"], "class_weeks": rb["class_weeks"], "warnings": rb["warnings"],
+                    "frequent_absentees": sorted([{"student_id": x["id"], "name": x["display_name"], "absences": x["term"]["absent"], "percent": x["term"]["percent"]}
+                                                  for x in rb["students"] if x["term"]["absent"] >= settings.get("frequent_absence_count")],
+                                                 key=lambda y: -y["absences"])[:8]}
+    except ApiError:
+        register = None
+    ranked = [x for x in (exam["students"] if exam else []) if x["average"] is not None]
+    best = sorted(ranked, key=lambda x: -x["average"])[:5]
+    support = [x for x in sorted(ranked, key=lambda x: x["average"]) if x["average"] < settings.get("support_threshold")][:8]
+    pick = lambda xs: [{"student_id": x["student_id"], "name": x["student_name"], "average": x["average"], "position": ordinal(x["position"]) if x["position"] else None, "grade": x["grade"]} for x in xs]
     return jsonify({
+        "composition": {"girls": sum(1 for x in students if x["gender"] == "female"), "boys": sum(1 for x in students if x["gender"] == "male")},
+        "register": register, "best_students": pick(best), "needs_improvement": pick(support),
         "class": {**cls, "students": len(students)}, "teachers": teachers,
         "attendance": {"today": today_state, "period_label": period_label, "period": att_period, "series": series,
                        "grid_dates": [x.isoformat() for x in grid_days], "students": stu, "poor_threshold": thr},
