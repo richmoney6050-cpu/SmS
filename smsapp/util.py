@@ -277,3 +277,15 @@ def pct(num, den, digits=1):
 def like(q: str) -> str:
     esc = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{esc}%"
+
+
+def ordinal(n) -> str | None:
+    """1 -> 1st, 2 -> 2nd, 3 -> 3rd, 11 -> 11th, 22 -> 22nd. Positions are shown like this and never as 'x out of y'."""
+    if n is None:
+        return None
+    n = int(n)
+    if 10 <= n % 100 <= 20:
+        suf = "th"
+    else:
+        suf = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suf}"

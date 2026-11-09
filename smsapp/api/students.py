@@ -27,10 +27,12 @@ def _current_year_id():
 
 def _student_fields(d: dict, creating: bool) -> dict:
     d = dict(d)
+    legacy_full = None
     if not (d.get("first_name") or "").strip() and (d.get("full_name") or "").strip():
         d["first_name"], d["middle_name"], d["surname"] = names.parse_name(d["full_name"])
         if not d["surname"]:
             d["surname"] = d["first_name"]
+            legacy_full = " ".join(d["full_name"].split())
     v = (
         V(d)
         .str("first_name", "First name", min_len=1, max_len=60)
@@ -47,7 +49,7 @@ def _student_fields(d: dict, creating: bool) -> dict:
     )
     data = v.done()
     data["middle_name"] = data["middle_name"] or ""
-    data["full_name"] = names.compose(data["first_name"], data["middle_name"], data["surname"])
+    data["full_name"] = legacy_full or names.compose(data["first_name"], data["middle_name"], data["surname"])
     if data["date_of_birth"] >= data["admission_date"]:
         raise ApiError(422, "The admission date must be after the date of birth.", fields={"admission_date": "Must be after the date of birth."})
     return data

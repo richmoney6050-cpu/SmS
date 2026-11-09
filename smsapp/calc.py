@@ -325,3 +325,18 @@ def subject_average_history(class_ids=None) -> dict[tuple[int, int], list[dict]]
                     "exam_id": ex["id"], "exam": ex["name"], "average": sub["average"],
                     "class_name": sub["class_name"], "subject_name": sub["subject_name"]})
     return hist
+
+
+def term_positions(class_id: int, term_id: int) -> dict[int, dict]:
+    """Position over a whole term: the mean of each student's overall averages across the term's examinations
+    (only those where every subject is complete). Equal means share a position."""
+    per: dict[int, list[float]] = {}
+    for e in rows("SELECT e.id FROM examinations e JOIN examination_subjects es ON es.examination_id=e.id WHERE e.term_id=? AND es.class_id=? GROUP BY e.id",
+                  (term_id, class_id)):
+        ov = student_overview(load_exam(e["id"], [class_id]))
+        for (cid, sid), v in ov.items():
+            if cid == class_id and v["all_complete"] and v["average"] is not None:
+                per.setdefault(sid, []).append(v["average"])
+    avgs = {sid: round(sum(v) / len(v), 2) for sid, v in per.items()}
+    ranks = _rank(list(avgs.items()))
+    return {sid: {"average": avgs[sid], "position": ranks[sid]} for sid in avgs}

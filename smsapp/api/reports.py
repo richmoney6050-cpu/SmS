@@ -10,7 +10,7 @@ from ..audit import audit
 from ..db import execute, marks, row, rows, scalar, tx
 from ..pdfgen import render_pdf
 from ..security import current_user, require, require_class, require_student, visible_class_ids
-from ..util import ApiError, arg_int, body, local_now, parse_date, today, utcnow_iso
+from ..util import ApiError, arg_int, body, local_now, ordinal, parse_date, today, utcnow_iso
 from .attendance import analysis, resolve_period
 from .exams import results_payload
 
@@ -140,7 +140,7 @@ def student_report(sid):
             sb = subj[e["es_id"]]
             trows.append({"subject": sb["subject_name"], "ca": e["ca_total"], "exam": e["exam_total"],
                           "total": e["total"] if e["complete"] else "Incomplete", "percent": _pct(e["percent"]), "grade": e["grade"],
-                          "remark": e["remark"] if e["complete"] else "Marks not complete", "position": e["position"],
+                          "remark": e["remark"] if e["complete"] else "Marks not complete", "position": ordinal(e["position"]),
                           "class_average": _pct(sb["average"])})
         blocks.append({"type": "table", "title": "Academic results", "columns": _cols(
             ("subject", "Subject", None, 2.2), ("ca", f"Continuous assessment (/{ca_max:g})" if ca_max else "Continuous assessment", "right", 1.5),
@@ -151,7 +151,7 @@ def student_report(sid):
         if ov:
             blocks.append({"type": "stats", "title": "Performance summary", "items": [
                 {"label": "Overall average", "value": _pct(ov["average"])}, {"label": "Overall grade", "value": ov["grade"] or "-"},
-                {"label": "Class position", "value": (f"{ov['position']} of {ov['class_size_ranked']}" if ov["position"] else "Not ranked")},
+                {"label": "Class position", "value": (ordinal(ov["position"]) if ov["position"] else "Not ranked")},
                 {"label": "Subjects completed", "value": f"{ov['subjects_done']} of {ov['subjects_total']}"}]})
         grade_info = calc.grade_for(ov["average"], data["bands"]) if ov else None
         stored = row("SELECT comment FROM report_comments WHERE student_id=? AND examination_id=?", (sid, eid))
@@ -250,7 +250,7 @@ def class_report(cid):
         srows = []
         for st in res["students"]:
             r = rates.get(st["student_id"])
-            srows.append({"position": st["position"], "name": st["student_name"], "adm": st["admission_no"], "average": _pct(st["average"]), "grade": st["grade"],
+            srows.append({"position": ordinal(st["position"]), "name": st["student_name"], "adm": st["admission_no"], "average": _pct(st["average"]), "grade": st["grade"],
                           "done": f"{st['subjects_done']}/{st['subjects_total']}",
                           "attendance": _pct(calc.attendance_rate(r["p"] or 0, r["l"] or 0, r["a"] or 0)) if r else None})
         blocks.append({"type": "table", "title": "Students", "columns": _cols(

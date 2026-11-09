@@ -112,7 +112,12 @@ def create_exam():
         raise ApiError(422, "The due date cannot be before the start date.", fields={"marks_due_date": "Before the start date."})
     if scalar("SELECT 1 FROM academic_terms WHERE id=?", (data["term_id"],)) is None:
         raise ApiError(422, "Choose a valid term.", fields={"term_id": "Unknown term."})
-    comps = _validate_components(d.get("components"))
+    raw_components = d.get("components")
+    if not raw_components:  # the school's configured assessment structure (Settings) is the default
+        from .extras import assessment_structure
+
+        raw_components = assessment_structure()
+    comps = _validate_components(raw_components)
     class_ids = d.get("class_ids")
     if not isinstance(class_ids, list) or not class_ids or any(not isinstance(i, int) for i in class_ids):
         raise ApiError(422, "Choose at least one class.", fields={"class_ids": "Required."})
