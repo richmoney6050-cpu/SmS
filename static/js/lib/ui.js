@@ -265,3 +265,11 @@ export async function load(container, fn, { retry } = {}) {
     if (!(e instanceof ApiError)) console.error(e);
   }
 }
+
+/** 1 -> 1st, 2 -> 2nd, 11 -> 11th. Positions are always shown like this, never as "x out of y". */
+export function ord(n) {
+  if (n === null || n === undefined || n === "") return "-";
+  const v = Number(n); if (!Number.isFinite(v)) return String(n);
+  const t = v % 100, s = t >= 11 && t <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[v % 10] || "th";
+  return `${v}${s}`;
+}

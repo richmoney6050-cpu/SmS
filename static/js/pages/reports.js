@@ -55,6 +55,10 @@ function runner(url, params, fallback, extra) {
       extra?.(r.report, holder);
       mount(bar,
         button("Print", { ico: "printer", onClick: () => window.print() }),
+        button("Excel", { ico: "download", onClick: async (e) => {
+          const b = e.currentTarget; b.disabled = true;
+          try { await download(url, { ...params(), format: "xlsx" }, `${fallback}.xlsx`); toast("Excel file downloaded.", "success"); } catch (err) { errorToast(err); } finally { b.disabled = false; }
+        } }),
         button("Download PDF", { kind: "primary", ico: "download", onClick: async (e) => {
           const b = e.currentTarget; b.disabled = true;
           try { await download(url, { ...params(), format: "pdf" }, `${fallback}.pdf`); toast("PDF downloaded.", "success"); } catch (err) { errorToast(err); } finally { b.disabled = false; }
@@ -82,8 +86,8 @@ function studentTab(ctx, root, q) {
 
   async function show() {
     if (!chosen) return;
-    const url = `/api/reports/student/${chosen.id}`;
-    current = runner(url, () => ({ exam_id: exam.value }), `student-report-${chosen.admission_no || chosen.id}`, (doc, node) => commentEditor(doc, node, show));
+    const url = `/api/reports/report-card/${chosen.id}`;
+    current = runner(url, () => ({ exam_id: exam.value }), `student-report-${chosen.admission_no || chosen.id}`, (doc, node) => remarksEditor(doc, node, show, ctx));
     mount(holder, current.node); await current.run();
   }
   async function pick(s) {
@@ -106,15 +110,24 @@ function studentTab(ctx, root, q) {
   else mount(holder, card(null, empty("Choose a student", "Search above to generate a student report.", "users")));
 }
 
-function commentEditor(doc, node, refresh) {
-  const c = doc.comment;
-  if (!c) return;
-  const ta = textarea({ rows: 3, maxlength: 600 }); ta.value = c.comment;
+function remarksEditor(doc, node, refresh, ctx) {
+  const r = doc.remarks;
+  if (!r) return;
+  const tNode = textarea({ rows: 3, maxlength: 600 }); tNode.value = r.teacher || "";
+  const hNode = textarea({ rows: 3, maxlength: 600 }); hNode.value = r.headmaster || "";
+  const canHead = ctx.can("reports.school");
+  if (!canHead) hNode.disabled = true;
+  const save = async () => {
+    try {
+      const d = { student_id: r.student_id, exam_id: r.exam_id, comment: tNode.value };
+      if (canHead) d.headmaster_comment = hNode.value;
+      await put("/api/reports/remarks", d); toast("Remarks saved.", "success"); refresh();
+    } catch (e) { errorToast(e); }
+  };
   const box = h("div", { class: "card no-print", style: { marginTop: "14px" } }, h("div", { class: "card-b stack-sm" },
-    h("h3", null, "Edit academic comment"), h("div", { class: "hint" }, c.custom ? "A custom comment is saved for this examination." : "This comment is generated from the results. Edit it to save your own wording."), ta,
-    h("div", { class: "row" },
-      button("Save comment", { kind: "primary", sm: true, ico: "check", onClick: async () => { try { await put("/api/reports/comments", { student_id: c.student_id, exam_id: c.exam_id, comment: ta.value }); toast("Comment saved.", "success"); refresh(); } catch (e) { errorToast(e); } } }),
-      c.custom ? button("Use generated comment", { sm: true, ico: "refresh", onClick: async () => { if (!(await confirmDialog({ title: "Reset comment?", message: "Your custom comment will be replaced with the generated one.", confirmText: "Reset" }))) return; try { await del(`/api/reports/comments?student_id=${c.student_id}&exam_id=${c.exam_id}`); toast("Comment reset.", "success"); refresh(); } catch (e) { errorToast(e); } } }) : null)));
+    h("h3", null, "Remarks"), h("div", { class: "hint" }, "Generated from the results until you write your own."),
+    field("Class teacher's remark", tNode), field(canHead ? "Headmaster's remark" : "Headmaster's remark (headmaster only)", hNode),
+    h("div", { class: "row" }, button("Save remarks", { kind: "primary", sm: true, ico: "check", onClick: save }))));
   node.parentElement ? node.parentElement.appendChild(box) : node.appendChild(box);
 }
 
@@ -132,7 +145,12 @@ function classTab(ctx, root, q) {
   };
   cls.addEventListener("change", async () => { try { const opts = await examOptions(cls.value); mount(exam, ...opts.map(([v, l]) => h("option", { value: v }, l))); } catch { /* optional */ } show(); });
   exam.addEventListener("change", show);
-  mount(root, h("div", { class: "toolbar" }, field("Class", cls), field("Examination", exam)), holder);
+  const dl = (path, ext, label) => button(label, { ico: "download", onClick: async (e) => {
+    if (!cls.value) return toast("Choose a class first.", "error");
+    const b = e.currentTarget; b.disabled = true;
+    try { await download(`/api/reports/${path}/${cls.value}`, { exam_id: exam.value, format: ext }, `${path.replace("/", "-")}-${cls.value}.${ext}`); toast("Downloaded.", "success"); } catch (err) { errorToast(err); } finally { b.disabled = false; }
+  } });
+  mount(root, h("div", { class: "toolbar" }, field("Class", cls), field("Examination", exam), dl("report-cards/class", "pdf", "All report cards (PDF)"), dl("broadsheet", "pdf", "Broadsheet (PDF)"), dl("broadsheet", "xlsx", "Broadsheet (Excel)")), holder);
   if (cls.value) cls.dispatchEvent(new Event("change")); else show();
 }
 

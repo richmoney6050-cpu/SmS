@@ -1,7 +1,7 @@
 // School-wide academic performance: classes, subjects, students, trends, declines and side-by-side comparison.
 import { get } from "../lib/api.js";
 import { barChart, hbarChart, lineChart } from "../lib/charts.js";
-import { badge, button, card, dataTable, empty, errorToast, field, fmtNum, fmtPct, h, icon, load, mount, notice, pageHead, select, stat } from "../lib/ui.js";
+import { badge, button, card, dataTable, empty, errorToast, field, fmtNum, fmtPct, h, icon, load, mount, notice, pageHead, select, stat, ord } from "../lib/ui.js";
 import { gradeBadge, studentLink } from "./common.js";
 
 export async function render(ctx, head, body) {
@@ -44,7 +44,7 @@ function view(d, ctx) {
       card("Pass and failure", hbarChart({ title: "Pass and fail by class", labels: classes.map((c) => c.class_name), series: [{ name: "Pass %", values: classes.map((c) => c.pass_rate), color: "var(--good)" }, { name: "Fail %", values: classes.map((c) => c.fail_rate), color: "var(--crit)" }], max: 100, format: (v) => `${v}%`, rowHeight: 50 }))),
     h("div", { class: "grid g2" },
       card("Highest-performing students", dataTable({ rows: ex.top_students, columns: [
-        { key: "position", label: "Pos.", align: "center", render: (s) => s.position ?? "-" }, { key: "student_name", label: "Student", render: (s) => studentLink(s.student_id, s.student_name) }, { key: "class_name", label: "Class" },
+        { key: "position", label: "Pos.", align: "center", render: (s) => ord(s.position) }, { key: "student_name", label: "Student", render: (s) => studentLink(s.student_id, s.student_name) }, { key: "class_name", label: "Class" },
         { key: "average", label: "Average", align: "right", render: (s) => fmtPct(s.average) }, { key: "grade", label: "Grade", align: "center", render: (s) => gradeBadge(s.grade) }], empty: empty("No ranked students yet", "Students are ranked once every subject has marks.", "users") }), { flush: true }),
       card(`Students who need academic support (below ${ex.support_threshold ?? d.support_threshold}%)`, dataTable({ rows: ex.support_students, sortKey: "average", columns: [
         { key: "student_name", label: "Student", render: (s) => studentLink(s.student_id, s.student_name) }, { key: "class_name", label: "Class" },

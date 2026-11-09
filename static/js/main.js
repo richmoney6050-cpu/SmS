@@ -1,6 +1,6 @@
 // Application shell: authentication, navigation, theme, and page routing.
 import { ApiError, events, get, post, put, setCsrf } from "./lib/api.js";
-import { button, clear, confirmDialog, errorToast, field, h, icon, initials, input, applyErrors, named, modal, mount, setTimezone, toast, loading } from "./lib/ui.js";
+import { button, clear, confirmDialog, errorToast, field, h, icon, initials, input, applyErrors, named, modal, mount, setTimezone, toast, loading, notice } from "./lib/ui.js";
 
 const root = document.getElementById("app");
 const state = { user: null, school: null, meta: null, cleanup: null, alerts: 0, navOpen: false };
@@ -50,7 +50,7 @@ async function boot() {
   try {
     const me = await get("/api/auth/me");
     setCsrf(me.csrf); state.school = me.school; setTimezone(me.school.timezone);
-    if (me.user) { state.user = me.user; await afterSignIn(); } else showAuth(me.needs_setup);
+    if (me.user) { state.user = me.user; await afterSignIn(); } else showAuth();
   } catch (e) {
     mount(root, h("div", { class: "empty", style: { marginTop: "20vh" } }, h("h3", null, "Cannot reach the server"), h("p", null, e.message), button("Try again", { kind: "primary", onClick: () => location.reload() })));
   }
@@ -65,7 +65,7 @@ async function afterSignIn() {
   updateBell();
 }
 
-events.addEventListener("auth", () => { if (state.user) { state.user = null; toast("Your session has ended. Please sign in again.", "warn"); get("/api/auth/me").then((me) => { setCsrf(me.csrf); showAuth(me.needs_setup); }); } });
+events.addEventListener("auth", () => { if (state.user) { state.user = null; toast("Your session has ended. Please sign in again.", "warn"); get("/api/auth/me").then((me) => { setCsrf(me.csrf); showAuth(); }); } });
 events.addEventListener("password", () => { if (state.user) { state.user.must_change_password = true; forcePasswordChange(); } });
 events.addEventListener("csrf", async () => { try { const me = await get("/api/auth/me"); setCsrf(me.csrf); toast("Your session token was refreshed. Please repeat your last action.", "warn"); } catch { /* ignore */ } });
 window.addEventListener("hashchange", () => { if (state.user && !state.user.must_change_password) { state.navOpen = false; render(); } });
@@ -84,53 +84,145 @@ function authLayout(title, subtitle, form) {
     h("div", { class: "auth-pane" }, h("div", { class: "auth-card stack" }, h("div", null, h("h1", null, title), h("p", { class: "muted", style: { marginTop: "6px" } }, subtitle)), form))));
 }
 
-function showAuth(needsSetup) {
-  state.user = null; state.cleanup?.(); state.cleanup = null;
-  document.title = state.school?.name ? `Sign in | ${state.school.name}` : "Sign in";
-  needsSetup ? showSetup() : showLogin();
+const RULES = [["At least 10 characters", (v) => v.length >= 10], ["An uppercase letter (A-Z)", (v) => /[A-Z]/.test(v)], ["A lowercase letter (a-z)", (v) => /[a-z]/.test(v)],
+  ["A number (0-9)", (v) => /\d/.test(v)], ["A symbol such as ! # $ %", (v) => /[^A-Za-z0-9\s]/.test(v)]];
+
+/** Password input with show/hide, live rule checklist and a strength bar. */
+function passwordField(label, name, { rules = false, autocomplete = "new-password" } = {}) {
+  const inp = input({ type: "password", autocomplete, required: true });
+  const toggle = h("button", { type: "button", "aria-label": "Show password", onclick: () => { const show = inp.type === "password"; inp.type = show ? "text" : "password"; toggle.textContent = show ? "Hide" : "Show"; toggle.setAttribute("aria-label", show ? "Hide password" : "Show password"); } }, "Show");
+  const f = named(name, field(label, h("div", { class: "pw-wrap" }, inp, toggle), { required: true }));
+  const bar = h("i"), meter = h("div", { class: "strength", "aria-hidden": "true" }, bar), list = h("ul", { class: "rules" }, RULES.map(([t]) => h("li", null, t))), label2 = h("div", { class: "small muted" });
+  if (rules) {
+    f.append(meter, label2, list);
+    inp.addEventListener("input", () => {
+      const v = inp.value, ok = RULES.map(([, t]) => t(v)), n = ok.filter(Boolean).length + (v.length >= 14 ? 1 : 0);
+      list.querySelectorAll("li").forEach((li, i) => li.classList.toggle("ok", ok[i]));
+      bar.style.width = (v ? Math.max(8, (n / 6) * 100) : 0) + "%";
+      bar.style.background = n <= 2 ? "var(--crit)" : n <= 4 ? "var(--warn)" : "var(--good)";
+      label2.textContent = v ? (n <= 2 ? "Weak password" : n <= 4 ? "Getting there" : n === 5 ? "Strong password" : "Very strong password") : "";
+    });
+  }
+  return { node: f, input: inp };
 }
 
+function copyButton(text, label = "Copy") {
+  return h("button", { class: "btn sm", type: "button", onclick: async (e) => { try { await navigator.clipboard.writeText(text); e.currentTarget.textContent = "Copied"; } catch { toast("Copy is not available here. Select the text and copy it.", "warn"); } } }, icon("copy"), label);
+}
+
+function authRoute() { const name = location.hash.replace(/^#\/?/, "").split("?")[0]; return ["register", "forgot", "reset", "verify"].includes(name) ? name : "login"; }
+function hashToken() { const i = location.hash.indexOf("?"); return new URLSearchParams(i < 0 ? "" : location.hash.slice(i + 1)).get("token") || ""; }
+
+function showAuth() {
+  state.user = null; state.cleanup?.(); state.cleanup = null;
+  const r = authRoute();
+  document.title = "School Management System";
+  ({ login: showLogin, register: showRegister, forgot: showForgot, reset: showReset, verify: showVerify }[r])();
+}
+window.addEventListener("hashchange", () => { if (!state.user) showAuth(); });
+
 function showLogin() {
-  const user = named("username", field("Username", input({ autocomplete: "username", autocapitalize: "none", spellcheck: "false", required: true }), { required: true }));
-  const pass = named("password", field("Password", input({ type: "password", autocomplete: "current-password", required: true }), { required: true }));
+  const user = named("username", field("Username", input({ autocomplete: "username", autocapitalize: "none", spellcheck: "false", required: true, placeholder: "e.g. johnmensah01" }), { required: true }));
+  const pw = passwordField("Password", "password", { autocomplete: "current-password" });
   const submit = h("button", { class: "btn primary", type: "submit", style: { width: "100%" } }, icon("login"), "Sign in");
   const form = h("form", { class: "stack", novalidate: true, onsubmit: async (e) => {
     e.preventDefault(); applyErrors(form, null);
     submit.setAttribute("aria-busy", "true");
     try {
-      const r = await post("/api/auth/login", { username: user.querySelector("input").value, password: pass.querySelector("input").value });
+      const r = await post("/api/auth/login", { username: user.querySelector("input").value, password: pw.input.value });
       setCsrf(r.csrf); state.user = r.user; state.school = r.school; setTimezone(r.school.timezone);
+      location.hash = "";
       await afterSignIn();
-    } catch (err) { applyErrors(form, err); if (!(err instanceof ApiError)) errorToast(err); pass.querySelector("input").value = ""; }
+    } catch (err) { applyErrors(form, err); if (!(err instanceof ApiError)) errorToast(err); pw.input.value = ""; }
     finally { submit.removeAttribute("aria-busy"); }
-  } }, user, pass, submit);
-  authLayout("Sign in", "Use the account your administrator created for you.", form);
+  } }, user, pw.node, submit,
+  h("div", { class: "linkrow" }, h("a", { href: "#/forgot" }, "Forgot password?"), h("a", { href: "#/register" }, "Register your school")));
+  authLayout("Sign in", "Use the username created for you when you registered (for example johnmensah01).", form);
   user.querySelector("input").focus();
 }
 
-function showSetup() {
-  const f = {
-    school_name: named("school_name", field("School name", input({ required: true }), { required: true })),
-    full_name: named("full_name", field("Your full name", input({ autocomplete: "name" }), { required: true })),
-    username: named("username", field("Choose a username", input({ autocomplete: "username", autocapitalize: "none" }), { required: true })),
-    password: named("password", field("Choose a password", input({ type: "password", autocomplete: "new-password" }), { required: true, hint: "At least 10 characters, with letters and numbers." })),
-  };
+function showRegister() {
+  const school = named("school_name", field("School name", input({ required: true, maxlength: 120, autocomplete: "organization" }), { required: true }));
+  const full = named("full_name", field("Full name", input({ required: true, maxlength: 120, autocomplete: "name" }), { required: true }));
+  const preview = h("div", { class: "username-preview", "aria-live": "polite" }, "Your username will appear here");
+  const email = named("email", field("Email (optional)", input({ type: "email", autocomplete: "email" }), { hint: "Used for password reset links and verification where the server supports email." }));
+  const pw = passwordField("Password", "password", { rules: true });
+  const pw2 = passwordField("Confirm password", "confirm_password");
+  let username = "", t;
+  const update = () => { clearTimeout(t); const v = full.querySelector("input").value.trim(); if (v.length < 2) { preview.textContent = "Your username will appear here"; username = ""; return; }
+    t = setTimeout(async () => { try { const r = await get("/api/auth/username-preview", { full_name: v }); username = r.username; preview.textContent = ""; preview.append("Your username: ", h("b", null, r.username)); } catch { /* shown on submit */ } }, 250); };
+  full.querySelector("input").addEventListener("input", update);
+  const submit = h("button", { class: "btn primary", type: "submit", style: { width: "100%" } }, "Create my school account");
   const form = h("form", { class: "stack", novalidate: true, onsubmit: async (e) => {
     e.preventDefault(); applyErrors(form, null);
-    const body = Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v.querySelector("input").value]));
+    if (pw.input.value !== pw2.input.value) { applyErrors(form, new ApiError(422, "", "validation", { confirm_password: "The two passwords do not match." })); return; }
+    submit.setAttribute("aria-busy", "true");
     try {
-      await post("/api/auth/setup", body);
-      const r = await post("/api/auth/login", { username: body.username, password: body.password });
-      setCsrf(r.csrf); state.user = r.user; state.school = r.school; await afterSignIn();
-      toast("Welcome! Next, add your academic year, classes and teachers under Administration.", "success", 9000);
+      const r = await post("/api/auth/register", { school_name: school.querySelector("input").value, full_name: full.querySelector("input").value, email: email.querySelector("input").value,
+        password: pw.input.value, confirm_password: pw2.input.value, username });
+      setCsrf(r.csrf); state.user = r.user; state.school = r.school; setTimezone(r.school.timezone);
+      showWelcome(r);
     } catch (err) { applyErrors(form, err); if (!(err instanceof ApiError)) errorToast(err); }
-  } }, ...Object.values(f), h("button", { class: "btn primary", type: "submit" }, "Create administrator account"));
-  authLayout("Set up your school", "Create the first Super Administrator account. This screen appears only once.", form);
+    finally { submit.removeAttribute("aria-busy"); }
+  } }, school, full, preview, email, pw.node, pw2.node, submit, h("div", { class: "linkrow" }, h("span", { class: "muted" }, "Already registered?"), h("a", { href: "#/" }, "Sign in")));
+  authLayout("Register your school", "Create your school's private workspace in a minute. You will be its Headmaster / School Administrator.", form);
+  school.querySelector("input").focus();
+}
+
+function showWelcome(r) {
+  const body = h("div", { class: "stack" },
+    h("p", null, "Your school workspace is ready. Write down your sign-in details now:"),
+    h("div", null, h("div", { class: "small muted" }, "Your username"), h("div", { class: "code-box" }, r.username), h("div", { style: { marginTop: "6px" } }, copyButton(r.username))),
+    h("div", null, h("div", { class: "small muted" }, "Your recovery code (shown only once)"), h("div", { class: "code-box" }, r.recovery_code), h("div", { style: { marginTop: "6px" } }, copyButton(r.recovery_code)),
+      h("p", { class: "small muted", style: { marginTop: "6px" } }, "If you ever forget your password, this code lets you set a new one. Keep it somewhere safe.")),
+    r.verification_sent ? notice("We sent a confirmation link to your email address.", "", "info") : (r.email_enabled ? null : notice("Email is not set up on this server, so email verification is switched off. Your account works normally.", "", "info")),
+    h("button", { class: "btn primary", type: "button", style: { width: "100%" }, onclick: async () => { location.hash = ""; await afterSignIn(); toast("Welcome! Start by creating your classes under Attendance, or add teachers under Administration.", "success", 9000); } }, "Continue to my dashboard"));
+  authLayout("Account created", state.school.name, body);
+}
+
+function showForgot() {
+  const user = named("username", field("Username", input({ autocomplete: "username", autocapitalize: "none", required: true }), { required: true }));
+  const msg = h("div");
+  const form = h("form", { class: "stack", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault(); applyErrors(form, null);
+    try { const r = await post("/api/auth/forgot-password", { username: user.querySelector("input").value }); mount(msg, notice(r.message, "good", "check")); }
+    catch (err) { applyErrors(form, err); if (!(err instanceof ApiError)) errorToast(err); }
+  } }, user, button("Send reset link", { kind: "primary", type: "submit" }), msg,
+  h("div", { class: "linkrow" }, h("a", { href: "#/reset" }, "I have a recovery code"), h("a", { href: "#/" }, "Back to sign in")));
+  authLayout("Forgot your password?", "Enter your username. If email is set up for your account we will send a reset link. Teachers can also ask their School Administrator to reset it.", form);
+}
+
+function showReset() {
+  const token = hashToken();
+  const user = named("username", field("Username", input({ autocomplete: "username", autocapitalize: "none" }), { required: !token }));
+  const code = named("recovery_code", field("Recovery code", input({ autocapitalize: "characters", placeholder: "XXXX-XXXX-XXXX-XXXX" }), { required: !token }));
+  const pw = passwordField("New password", "new_password", { rules: true });
+  const pw2 = passwordField("Confirm new password", "confirm_password");
+  const form = h("form", { class: "stack", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault(); applyErrors(form, null);
+    try {
+      const r = await post("/api/auth/reset-password", { token, username: user.querySelector("input").value, recovery_code: code.querySelector("input").value, new_password: pw.input.value, confirm_password: pw2.input.value });
+      mount(root, h("div", { class: "auth" }, h("div", { class: "auth-pane", style: { gridColumn: "1 / -1" } }, h("div", { class: "auth-card stack" }, h("h1", null, "Password changed"),
+        h("p", null, "You can now sign in with your new password."),
+        r.new_recovery_code ? h("div", null, h("div", { class: "small muted" }, "Your new recovery code (the old one no longer works)"), h("div", { class: "code-box" }, r.new_recovery_code), h("div", { style: { marginTop: "6px" } }, copyButton(r.new_recovery_code))) : null,
+        h("a", { class: "btn primary", href: "#/" }, "Go to sign in")))));
+    } catch (err) { applyErrors(form, err); if (!(err instanceof ApiError)) errorToast(err); }
+  } }, token ? null : user, token ? null : code, pw.node, pw2.node, button("Set new password", { kind: "primary", type: "submit" }), h("a", { href: "#/" }, "Back to sign in"));
+  authLayout("Set a new password", token ? "Choose a new password for your account." : "Enter your username and the recovery code you saved when you registered.", form);
+}
+
+async function showVerify() {
+  const token = hashToken();
+  authLayout("Confirming your email", "", h("div", { class: "loading" }, h("span", { class: "spinner" }), "Please wait..."));
+  let body;
+  try { await post("/api/auth/verify-email", { token }); body = h("div", { class: "stack" }, notice("Your email address is confirmed. Thank you.", "good", "check"), h("a", { class: "btn primary", href: "#/" }, "Continue")); }
+  catch (e) { body = h("div", { class: "stack" }, notice(e.message, "bad", "alert"), h("a", { class: "btn", href: "#/" }, "Back to sign in")); }
+  authLayout("Email confirmation", "", body);
 }
 
 function forcePasswordChange() {
   const cur = named("current_password", field("Temporary password", input({ type: "password", autocomplete: "current-password" }), { required: true }));
-  const nw = named("new_password", field("New password", input({ type: "password", autocomplete: "new-password" }), { required: true, hint: "At least 10 characters, with letters and numbers." }));
+  const nw = named("new_password", field("New password", input({ type: "password", autocomplete: "new-password" }), { required: true, hint: "At least 10 characters with upper and lower case letters, a number and a symbol." }));
   const form = h("form", { class: "stack", novalidate: true, onsubmit: async (e) => {
     e.preventDefault(); applyErrors(form, null);
     try {
@@ -147,13 +239,13 @@ async function signOut() {
   const me = await get("/api/auth/me").catch(() => null);
   if (me) setCsrf(me.csrf);
   location.hash = "";
-  showAuth(false);
+  showAuth();
 }
 
 // ------------------------------------------------------------ change password dialog
 function changePasswordDialog() {
   const cur = named("current_password", field("Current password", input({ type: "password", autocomplete: "current-password" }), { required: true }));
-  const nw = named("new_password", field("New password", input({ type: "password", autocomplete: "new-password" }), { required: true, hint: "At least 10 characters, with letters and numbers." }));
+  const nw = named("new_password", field("New password", input({ type: "password", autocomplete: "new-password" }), { required: true, hint: "At least 10 characters with upper and lower case letters, a number and a symbol." }));
   const form = h("form", { class: "stack", novalidate: true }, cur, nw);
   const m = modal({ title: "Change password", size: "sm", body: form, actions: [
     h("button", { class: "btn", type: "button", onclick: () => m.close() }, "Cancel"),
@@ -214,6 +306,39 @@ function userMenu() {
   return wrap;
 }
 
+function searchBox() {
+  const inp = h("input", { class: "input", type: "search", placeholder: "Search students, teachers, classes, exams...", "aria-label": "Global search", autocomplete: "off" });
+  const pop = h("div", { class: "search-pop", role: "listbox", hidden: true });
+  const wrap = h("div", { class: "topsearch", id: "topsearch" }, inp, pop);
+  const href = (r) => ({ student: `#/students/${r.id}`, class: can("command.view") ? `#/dashboard/classes/${r.id}` : `#/attendance?class=${r.id}`, attendance: `#/attendance?class=${r.id}`,
+    teacher: `#/dashboard/teachers/${r.id}`, exam: `#/exams/${r.id}`, report: "#/reports" }[r.type] || "#/dashboard");
+  const LABEL = { student: "Students", class: "Classes", attendance: "Attendance", teacher: "Teachers", exam: "Examinations", report: "Reports" };
+  const close = () => { pop.hidden = true; };
+  let seq = 0, t;
+  inp.addEventListener("input", () => {
+    clearTimeout(t); const q = inp.value.trim();
+    if (q.length < 2) return close();
+    t = setTimeout(async () => {
+      const n = ++seq;
+      try {
+        const r = await get("/api/search", { q });
+        if (n !== seq) return;
+        clear(pop);
+        if (!r.results.length) pop.append(h("div", { class: "small muted", style: { padding: "10px" } }, "No matches."));
+        let last = "";
+        for (const x of r.results) {
+          if (x.type !== last) { pop.append(h("div", { class: "grp" }, LABEL[x.type] || x.type)); last = x.type; }
+          pop.append(h("a", { href: href(x), onclick: () => { close(); inp.value = ""; wrap.classList.remove("open"); } }, h("span", null, x.title), h("small", null, x.subtitle)));
+        }
+        pop.hidden = false;
+      } catch { /* search is optional */ }
+    }, 250);
+  });
+  inp.addEventListener("keydown", (e) => { if (e.key === "Escape") { close(); inp.blur(); } });
+  document.addEventListener("click", (e) => { if (!wrap.contains(e.target) && e.target.id !== "searchbtn") close(); });
+  return wrap;
+}
+
 function shell() {
   const items = navItems();
   const current = parseHash().name;
@@ -227,7 +352,8 @@ function shell() {
     h("div", { class: "main" },
       h("header", { class: "topbar" },
         h("button", { class: "icon-btn menu-btn", "aria-label": "Open menu", onclick: () => { app.classList.toggle("nav-open"); state.navOpen = app.classList.contains("nav-open"); } }, icon("menu")),
-        h("div", { class: "title grow" }, titleFor), bell,
+        h("div", { class: "title grow" }, titleFor), searchBox(),
+        h("button", { class: "icon-btn", id: "searchbtn", "aria-label": "Search", title: "Search", onclick: () => { const t = document.getElementById("topsearch"); t.classList.toggle("open"); t.querySelector("input").focus(); } }, icon("search")), bell,
         h("button", { class: "icon-btn", "aria-label": "Toggle dark mode", title: "Light / dark mode", onclick: toggleTheme }, icon(currentTheme() === "dark" ? "sun" : "moon")),
         userMenu()),
       h("main", { class: "content", id: "view", tabindex: "-1" })));

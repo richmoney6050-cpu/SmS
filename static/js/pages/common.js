@@ -47,7 +47,7 @@ export function alertLink(a) {
 
 export const ALERT_LABELS = {
   missing_attendance: "Missing attendance", teacher_inactive: "Teacher inactive", marks_overdue: "Results overdue", marks_pending: "Results awaiting submission",
-  poor_attendance: "Poor attendance", declining_performance: "Declining performance", repeated_absence: "Repeated absence",
+  poor_attendance: "Poor attendance", declining_performance: "Declining performance", repeated_absence: "Repeated absence", absence_warning: "Attendance warning",
 };
 
 export function activityFeed(items, { empty } = {}) {

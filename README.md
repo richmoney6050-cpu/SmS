@@ -33,7 +33,9 @@ python manage.py seed-demo            # OPTIONAL: clearly labelled demonstration
 python -c "from smsapp import create_app; create_app().run(port=5000)"
 ```
 
-Open <http://localhost:5000>. On a brand-new database the first screen asks you to create the Super Administrator and name the school. That screen works only while there are zero users.
+Open <http://localhost:5000>. Click **Register your school** and enter the school name, your full name, then a password. A unique username (for example `johnmensah01`) is generated and shown before you finish; you sign in with it. Each registered school gets its own private database, so schools never see one another's data. The welcome screen shows a one-time **recovery code**; keep it safe, it lets you reset a forgotten password without email.
+
+CLI equivalents: `python manage.py create-admin --school-name "My School" --full-name "John Mensah"`; `backup` backs up every school; `restore FILE --school ID` restores one.
 
 ### Demonstration data
 
@@ -75,6 +77,7 @@ All settings are environment variables (or a `.env` file, see `.env.example`).
 | `SMS_AUTO_BACKUP`, `SMS_BACKUP_KEEP` | Daily automatic backup and how many to keep (1 / 14) |
 | `SMS_TRUST_PROXY` | `1` when behind a reverse proxy |
 | `SMS_MAX_UPLOAD_MB` | Upload limit (5) |
+| `SMS_SMTP_HOST`, `SMS_SMTP_PORT`, `SMS_SMTP_USER`, `SMS_SMTP_PASSWORD`, `SMS_SMTP_FROM` | Optional. When set, email verification and password-reset links are sent. When unset, no email is sent and the recovery code is the way to reset a password |
 
 School name, motto, address, logo, time zone, school days, attendance deadline, thresholds (poor attendance, frequent absences, inactive teachers, decline, support) and refresh rate are edited in **Administration > Settings and branding**. Nothing is hard-coded to a particular school.
 
@@ -144,8 +147,9 @@ deploy/                systemd, nginx and cron examples
 
 ## Limitations
 
-* SQLite suits one school on one server. For several concurrent schools or a multi-server cluster, port to PostgreSQL.
+* Many schools can share one server (one SQLite file each plus a small master registry). For very large deployments or a multi-server cluster, port to PostgreSQL.
 * Reports use the shared structured-document renderer; the PDF layout is tidy but intentionally simple.
 * Screen reports with many columns scroll horizontally on narrow screens.
-* Email/SMS notifications are not included (out of scope); alerts are in-app.
+* Email is used only for verification and password reset, and only when SMTP is configured. SMS is not included; alerts and announcements are in-app.
+* No school-fees module, by design.
 * Teacher "verified classroom activity" requires a physical process (e.g. signed timetable checks). The system records website and record activity only.

@@ -1,7 +1,7 @@
 // Class Monitoring: every class at a glance, and a complete read-only class view for supervisors.
 import { get } from "../lib/api.js";
 import { barChart, hbarChart } from "../lib/charts.js";
-import { badge, card, dataTable, empty, errorToast, field, fmtNum, fmtPct, h, icon, input, load, mount, notice, pageHead, rateBar, select, stat, statusBadge, tabs, ago, fmtDate, fmtDateTime, load as loadInto } from "../lib/ui.js";
+import { badge, card, dataTable, empty, errorToast, field, fmtNum, fmtPct, h, icon, input, load, mount, notice, pageHead, rateBar, select, stat, statusBadge, tabs, ago, fmtDate, fmtDateTime, load as loadInto, ord } from "../lib/ui.js";
 import { activityFeed, attendanceMark, backLink, gradeBadge, studentLink, when } from "./common.js";
 
 export async function render(ctx, head, body, id) {
@@ -115,7 +115,7 @@ function exam(d, ctx, id) {
       stat({ label: "Pass rate", value: fmtPct(t.pass_rate), ico: "check", tone: "good" }), stat({ label: "Fail rate", value: fmtPct(t.fail_rate), ico: "x", tone: t.fail_rate ? "bad" : "" }), stat({ label: "Students assessed", value: t.students_assessed, sub: `of ${d.class.students}`, ico: "users" })),
     card("Subject averages", hbarChart({ title: "Average by subject", labels: subj.map((s) => s.subject_name), series: [{ name: "Average %", values: subj.map((s) => s.average), color: "var(--s3)" }], max: 100, format: (v) => `${v}%`, emptyText: "No subject has complete marks yet." })),
     card("Student results", dataTable({ rows: ex.students, sortKey: "position", columns: [
-      { key: "position", label: "Pos.", align: "center", sortValue: (s) => s.position ?? 9999, render: (s) => s.position ?? "-" },
+      { key: "position", label: "Pos.", align: "center", sortValue: (s) => s.position ?? 9999, render: (s) => ord(s.position) },
       { key: "student_name", label: "Student", render: (s) => studentLink(s.student_id, s.student_name) },
       { key: "average", label: "Average", align: "right", sortValue: (s) => s.average ?? -1, render: (s) => fmtPct(s.average) },
       { key: "grade", label: "Grade", align: "center", render: (s) => gradeBadge(s.grade) },

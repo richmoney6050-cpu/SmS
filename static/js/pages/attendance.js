@@ -2,16 +2,17 @@
 import { ApiError, get, post } from "../lib/api.js";
 import { barChart, lineChart } from "../lib/charts.js";
 import { badge, button, card, confirmDialog, dataTable, empty, errorToast, field, fmtDate, fmtNum, fmtPct, h, icon, initials, input, load, mount, notice, pageHead, rateBar, select, stat, statusBadge, tabs, toast } from "../lib/ui.js";
+import { registerTab } from "./register.js";
 import { classOptions, studentLink, termOptions, yearOptions } from "./common.js";
 
 export async function render(ctx, view) {
   const q = ctx.query();
-  let active = q.get("tab") || "sheet";
+  let active = q.get("tab") || "register";
   const panel = h("div", { class: "view" }), nav = h("div");
-  const items = [["sheet", "Record attendance", "calendar"], ["dash", "Dashboard and reports", "chart"]];
+  const items = [["register", "Weekly register", "calendar"], ["sheet", "Daily sheet", "clock"], ["dash", "Dashboard and reports", "chart"]];
   const drawNav = () => mount(nav, tabs(items.map(([i, l, ic]) => ({ id: i, label: l, icon: ic })), active, async (t) => { if (dirtyGuard && !(await dirtyGuard())) return; active = t; drawNav(); drawPanel(); }));
   let dirtyGuard = null;
-  const drawPanel = () => { dirtyGuard = null; mount(panel, h("div")); const holder = panel.firstChild; (active === "sheet" ? sheet : dashboard)(ctx, holder, (g) => { dirtyGuard = g; }); };
+  const drawPanel = () => { dirtyGuard = null; mount(panel, h("div")); const holder = panel.firstChild; ({ register: registerTab, sheet, dash: dashboard }[active])(ctx, holder, (g) => { dirtyGuard = g; }); };
   mount(view, pageHead("Attendance", "Record daily attendance and monitor attendance across classes."), nav, panel);
   drawNav(); drawPanel();
   const warn = (e) => { if (dirtyGuard && dirtyGuard.dirty?.()) { e.preventDefault(); e.returnValue = ""; } };

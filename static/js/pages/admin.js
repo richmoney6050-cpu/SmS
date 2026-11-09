@@ -212,11 +212,11 @@ function yearDialog(y, done) {
   }, "sm");
 }
 function termDialog(years, year, t, done) {
-  const f = { name: named("name", field("Term name", input({ value: t?.name || "", placeholder: "e.g. Term 1" }), { required: true })), start_date: named("start_date", field("Starts", input({ type: "date", value: t?.start_date || "" }), { required: true })), end_date: named("end_date", field("Ends", input({ type: "date", value: t?.end_date || "" }), { required: true })) };
+  const f = { name: named("name", field("Term name", input({ value: t?.name || "", placeholder: "e.g. Term 1" }), { required: true })), start_date: named("start_date", field("Starts", input({ type: "date", value: t?.start_date || "" }), { required: true })), end_date: named("end_date", field("Ends", input({ type: "date", value: t?.end_date || "" }), { required: true })), weeks: named("weeks", field("Number of weeks in the term", input({ type: "number", min: 1, max: 30, value: t?.weeks || 13 }), { required: true })) };
   const cur = ck("Make this the current term", false);
   const form = h("form", { class: "stack", novalidate: true }, h("p", { class: "muted" }, `Academic year: ${year.name} (${fmtDate(year.start_date)} to ${fmtDate(year.end_date)})`), ...Object.values(f), !t ? cur.node : null);
   dlg(t ? "Edit term" : "Add term", form, "Save", async (m) => {
-    const b = { year_id: year.id, name: val(f, "name").value, start_date: val(f, "start_date").value, end_date: val(f, "end_date").value };
+    const b = { year_id: year.id, name: val(f, "name").value, start_date: val(f, "start_date").value, end_date: val(f, "end_date").value, weeks: Number(val(f, "weeks").value) || 13 };
     t ? await put(`/api/terms/${t.id}`, b) : await post("/api/terms", { ...b, is_current: cur.cb.checked });
     m.close(); toast("Saved.", "success"); done();
   }, "sm");
@@ -256,7 +256,8 @@ async function gradingTab(ctx, root) {
     await load(box, async () => {
       const r = await get("/api/grading");
       await ctx.refreshMeta?.();
-      return h("div", { class: "stack" }, notice("Grades are calculated from the active scale. Changing the scale changes how results display everywhere, but never changes saved marks.", "", "info"),
+      const st = await get("/api/assessment-structure");
+      return h("div", { class: "stack" }, structureCard(st.components, draw), notice("Grades are calculated from the active scale. Changing the scale changes how results display everywhere, but never changes saved marks.", "", "info"),
         h("div", { class: "row" }, button("New grading scale", { kind: "primary", ico: "plus", onClick: () => scaleDialog(null, draw) })),
         r.scales.map((s) => card(h("span", { class: "row" }, s.name, s.is_active ? badge("Active", "good", "check") : null),
           dataTable({ rows: s.bands, columns: [{ key: "min_percent", label: "From (%)", align: "right" }, { key: "grade", label: "Grade", render: (b) => h("b", null, b.grade) }, { key: "remark", label: "Remark" }, { key: "is_pass", label: "Result", render: (b) => (b.is_pass ? badge("Pass", "good") : badge("Fail", "bad")) }] }),
@@ -361,4 +362,25 @@ async function backupsTab(ctx, root) {
     });
   }
   await draw();
+}
+
+function structureCard(components, done) {
+  let list = components.map((c) => ({ ...c }));
+  const box = h("div", { class: "stack-sm" });
+  const total = () => list.reduce((a, c) => a + (Number(c.max_marks) || 0), 0);
+  const draw = () => {
+    mount(box, list.map((c, i) => {
+      const n = input({ value: c.name, maxlength: 60, "aria-label": "Component name" }); n.addEventListener("input", () => { c.name = n.value; });
+      const m = input({ type: "number", min: 1, step: "0.5", value: c.max_marks, "aria-label": "Maximum marks" }); m.addEventListener("input", () => { c.max_marks = Number(m.value); tot.textContent = `Total: ${total()} marks`; });
+      const k = select([["ca", "Continuous assessment"], ["exam", "Examination"]], c.kind); k.addEventListener("change", () => { c.kind = k.value; });
+      return h("div", { class: "row" }, n, k, m, button("", { sm: true, ico: "trash", title: "Remove", onClick: () => { list.splice(i, 1); draw(); } }));
+    }), tot, h("div", { class: "row" },
+      button("Add component", { sm: true, ico: "plus", onClick: () => { list.push({ name: "", kind: "ca", max_marks: 10 }); draw(); } }),
+      button("Save structure", { kind: "primary", sm: true, ico: "check", onClick: async () => {
+        try { await put("/api/assessment-structure", { components: list }); toast("Assessment structure saved. It applies to new examinations.", "success"); done(); } catch (e) { errorToast(e); }
+      } })));
+  };
+  const tot = h("div", { class: "small muted" }, `Total: ${total()} marks`);
+  draw();
+  return card("Assessment structure", h("div", { class: "stack-sm" }, h("div", { class: "hint" }, "Class Exercises, Homework, Class Tests, Mid-Semester and End-of-Term by default. Used when a new examination is created."), box));
 }

@@ -1,7 +1,7 @@
 // Dashboard: the Central Command Centre for leaders, a simple task dashboard for teachers.
-import { get, post } from "../lib/api.js";
+import { del, get, post } from "../lib/api.js";
 import { barChart, lineChart } from "../lib/charts.js";
-import { badge, button, card, dataTable, empty, errorToast, fmtDate, fmtNum, fmtPct, h, icon, load, loading, mount, notice, pageHead, rateBar, select, field, stat, statusBadge, tabs, toast, ago, fmtDateTime } from "../lib/ui.js";
+import { badge, button, card, dataTable, empty, errorToast, fmtDate, fmtNum, fmtPct, h, icon, load, loading, mount, notice, pageHead, rateBar, select, field, input, textarea, confirmDialog, stat, statusBadge, tabs, toast, ago, fmtDateTime } from "../lib/ui.js";
 import { ALERT_LABELS, activityFeed, alertLink, classLink, sevIcon, sevTone, when } from "./common.js";
 
 const TABS = [
@@ -42,6 +42,9 @@ async function overview(ctx, head, body, refreshers) {
       stat({ label: "Total students", value: fmtNum(s.students), ico: "users" }),
       stat({ label: "Total teachers", value: fmtNum(s.teachers), ico: "user" }),
       stat({ label: "Total classes", value: fmtNum(s.classes), ico: "school" }),
+      stat({ label: "Boys", value: fmtNum(s.boys), ico: "users" }),
+      stat({ label: "Girls", value: fmtNum(s.girls), ico: "users" }),
+      stat({ label: "Term attendance", value: fmtPct(s.term_attendance_rate), sub: "average this term", ico: "calendar" }),
       stat({ label: "Present today", value: fmtNum(s.present_today), sub: `${fmtNum(s.late_today)} late`, ico: "check", tone: "good" }),
       stat({ label: "Absent today", value: fmtNum(s.absent_today), ico: "x", tone: s.absent_today ? "bad" : "" }),
       stat({ label: "Attendance today", value: fmtPct(s.attendance_rate), sub: s.attendance_rate === null ? "Nothing recorded yet" : "of recorded students", ico: "calendar", tone: attTone }),
@@ -62,8 +65,9 @@ async function overview(ctx, head, body, refreshers) {
       h("dt", null, "Without class assignments"), h("dd", null, t.no_assignments)), { actions: h("a", { class: "btn sm", href: "#/dashboard/teachers" }, "Teacher monitoring") });
     const alertList = card("Needs attention", d.alerts.top.length ? h("ul", { class: "list" }, d.alerts.top.map((a) => alertRow(a, ctx))) : empty("All clear", "No open alerts right now.", "check"), { flush: true, actions: h("a", { class: "btn sm", href: "#/dashboard/alerts" }, `All alerts (${d.alerts.total})`) });
     const feed = card("Recent activity", activityFeed(d.activity, { empty: "No teacher activity yet." }), { flush: true, actions: h("a", { class: "btn sm", href: "#/dashboard/activity" }, "Full feed") });
+    const ann = await announcementsCard();
     const note = notice("Website logins and saved records show what teachers have done in this system. They do not confirm that a teacher is physically teaching.", "", "info");
-    mount(body, h("div", { class: "stack" }, stats, h("div", { class: "grid g-main" }, h("div", { class: "stack" }, attChart, trend, perf), h("div", { class: "stack" }, alertList, teacherCard, feed)), note));
+    mount(body, h("div", { class: "stack" }, stats, h("div", { class: "grid g-main" }, h("div", { class: "stack" }, attChart, trend, perf), h("div", { class: "stack" }, alertList, ann, teacherCard, feed)), note));
   };
   await draw(true);
   const secs = ctx.school.refresh_seconds;
@@ -131,4 +135,29 @@ async function renderTeacher(ctx, view) {
       h("div", { class: "grid g-stats" }, stat({ label: "My classes", value: new Set(d.assignments.map((a) => a.class_id)).size, ico: "school" }), stat({ label: "Tasks to do", value: d.tasks.length, ico: "clock", tone: d.tasks.length ? "warn" : "good" }), stat({ label: "Marks lists submitted", value: `${d.marks_progress.submitted}/${d.marks_progress.total}`, ico: "exam" })),
       h("div", { class: "grid g-main" }, card("My tasks", tasks, { flush: true }), card("Recent activity", activityFeed(d.recent_activity, { empty: "Nothing recorded yet." }), { flush: true })),
       h("h2", null, "My classes"), classes));
+}
+
+// ------------------------------------------------------------ announcements
+async function announcementsCard() {
+  const body = h("div", { class: "stack-sm" });
+  const draw = async () => {
+    let r;
+    try { r = await get("/api/announcements"); } catch { return mount(body, h("span", { class: "muted small" }, "Announcements are unavailable.")); }
+    const title = input({ maxlength: 120, placeholder: "Title", "aria-label": "Announcement title" });
+    const text = textarea({ rows: 3, maxlength: 2000, placeholder: "Message to staff" });
+    const aud = select([["all", "Everyone"], ["teachers", "Teachers"]], "all");
+    const form = r.can_post ? h("div", { class: "stack-sm" }, title, text, h("div", { class: "row" }, aud,
+      button("Post", { kind: "primary", sm: true, ico: "check", onClick: async () => {
+        try { await post("/api/announcements", { title: title.value, body: text.value, audience: aud.value }); toast("Announcement posted.", "success"); draw(); } catch (e) { errorToast(e); }
+      } }))) : null;
+    const list = r.items.length ? h("ul", { class: "list ann-list" }, r.items.map((a) => h("li", { class: "ann" },
+      h("div", null, h("b", null, a.title), h("div", { class: "small" }, a.body), h("div", { class: "tiny muted" }, `${a.author_name || ""} | ${a.created_at ? fmtDate(a.created_at.slice(0, 10)) : ""}`)),
+      r.can_post ? button("Delete", { sm: true, ico: "x", onClick: async () => {
+        if (!(await confirmDialog({ title: "Delete announcement?", message: "It will no longer be shown to staff.", confirmText: "Delete" }))) return;
+        try { await del(`/api/announcements/${a.id}`); draw(); } catch (e) { errorToast(e); }
+      } }) : null))) : h("span", { class: "muted small" }, "No announcements.");
+    mount(body, list, form);
+  };
+  await draw();
+  return card("Announcements", body);
 }

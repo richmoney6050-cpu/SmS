@@ -18,7 +18,27 @@ export async function render(ctx, head, body) {
   });
   [date, cls, term, year].forEach((x) => x.addEventListener("change", draw));
   term.addEventListener("change", () => { if (term.value) year.value = ""; });
-  mount(body, h("div", { class: "toolbar" }, field("Date", date), field("Class", cls), field("Academic term", term), field("Academic year", year)), out);
+  const reg = h("div");
+  const drawReg = () => load(reg, async () => {
+    const m = await get("/api/register/monitor", { term_id: term.value });
+    const rows = m.classes.map((c) => h("tr", null,
+      h("td", null, h("a", { href: `#/attendance?class=${c.class_id}&term=${m.term.id}` }, c.class_name)),
+      h("td", null, c.teacher || "-"),
+      h("td", { class: "num" }, `${c.boys} / ${c.girls}`),
+      h("td", { class: "num" }, c.today_recorded ? `${c.today_present} / ${c.today_absent}` : "Not marked"),
+      h("td", { class: "num" }, c.week ? fmtPct(c.week.percent) : "-"),
+      h("td", { class: "num" }, fmtPct(c.term.percent)),
+      h("td", { class: "num" }, c.warnings ? h("b", { style: { color: "var(--crit-ink)" } }, c.warnings) : "0"),
+      h("td", null, h("a", { class: "btn sm", href: `#/attendance?class=${c.class_id}&term=${m.term.id}` }, "Open register"))));
+    return card(`Weekly registers | ${m.term.name} ${m.term.year_name}${m.current_week ? ` | Week ${m.current_week}` : ""}`,
+      h("div", { class: "table-wrap" }, h("table", { class: "t" },
+        h("thead", null, h("tr", null, ["Class", "Class teacher", "Boys / Girls", "Today present / absent", "This week", "Term", "Absence warnings", ""].map((x) => h("th", null, x)))),
+        h("tbody", null, rows.length ? rows : h("tr", null, h("td", { colspan: 8, class: "muted" }, "No classes yet."))))),
+      { flush: true, actions: h("span", { class: "small muted" }, `School term attendance: ${fmtPct(m.school.percent)}`) });
+  });
+  term.addEventListener("change", drawReg);
+  mount(body, h("div", { class: "toolbar" }, field("Date", date), field("Class", cls), field("Academic term", term), field("Academic year", year)), reg, out);
+  drawReg();
   await draw();
 }
 
