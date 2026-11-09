@@ -6,7 +6,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request, send_file
 from PIL import Image, UnidentifiedImageError
 
-from .. import tenancy, calc
+from .. import names, tenancy, calc
 from ..audit import audit
 from ..db import execute, insert, marks, row, rows, scalar, tx
 from ..security import current_user, require, require_class, require_student, scope_sql
@@ -14,9 +14,9 @@ from ..util import ApiError, V, arg_int, body, like, parse_date, today, utcnow_i
 
 bp = Blueprint("students", __name__, url_prefix="/api/students")
 
-STATUSES = ("active", "inactive", "transferred", "graduated", "withdrawn")
+STATUSES = ("active", "inactive", "transferred", "graduated", "withdrawn", "archived")
 SORTS = {
-    "name": "s.full_name COLLATE NOCASE", "admission_no": "s.admission_no COLLATE NOCASE",
+    "name": "s.surname COLLATE NOCASE, s.first_name COLLATE NOCASE", "admission_no": "s.admission_no COLLATE NOCASE",
     "class": "c.name COLLATE NOCASE", "admission_date": "s.admission_date", "status": "s.status",
 }
 
@@ -26,19 +26,28 @@ def _current_year_id():
 
 
 def _student_fields(d: dict, creating: bool) -> dict:
+    d = dict(d)
+    if not (d.get("first_name") or "").strip() and (d.get("full_name") or "").strip():
+        d["first_name"], d["middle_name"], d["surname"] = names.parse_name(d["full_name"])
+        if not d["surname"]:
+            d["surname"] = d["first_name"]
     v = (
         V(d)
-        .str("full_name", "Full name", min_len=2, max_len=120)
-        .str("admission_no", "Admission number", max_len=30, pattern=r"[A-Za-z0-9._/-]+", pattern_msg="Use letters, numbers, dots, dashes or slashes.")
+        .str("first_name", "First name", min_len=1, max_len=60)
+        .str("middle_name", "Middle name", required=False, max_len=80)
+        .str("surname", "Surname", min_len=1, max_len=60)
+        .str("admission_no", "Student ID", required=False, max_len=30, pattern=r"[A-Za-z0-9._/-]+", pattern_msg="Use letters, numbers, dots, dashes or slashes.")
         .date("date_of_birth", "Date of birth", not_future=True, min_date=date(1990, 1, 1))
         .enum("gender", ("male", "female", "other"), "Gender")
         .str("guardian_name", "Parent/guardian name", min_len=2, max_len=120)
         .str("guardian_contact", "Parent/guardian contact", min_len=5, max_len=40, pattern=r"[0-9+()\s.-]{5,40}", pattern_msg="Enter a valid phone number.")
         .str("address", "Residential address", required=False, max_len=300)
-        .date("admission_date", "Admission date", not_future=True, min_date=date(1990, 1, 1))
+        .date("admission_date", "Admission date", not_future=True, min_date=date(1990, 1, 1), required=False, default=today().isoformat())
         .enum("status", STATUSES, "Status", required=False, default="active")
     )
     data = v.done()
+    data["middle_name"] = data["middle_name"] or ""
+    data["full_name"] = names.compose(data["first_name"], data["middle_name"], data["surname"])
     if data["date_of_birth"] >= data["admission_date"]:
         raise ApiError(422, "The admission date must be after the date of birth.", fields={"admission_date": "Must be after the date of birth."})
     return data
@@ -48,8 +57,8 @@ def _list_sql(u, args_src):
     where, args = ["1=1"], []
     q = (args_src.get("q") or "").strip()
     if q:
-        where.append("(s.full_name LIKE ? ESCAPE '\\' OR s.admission_no LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\')")
-        args += [like(q)] * 3
+        where.append("(s.full_name LIKE ? ESCAPE '\\' OR s.admission_no LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\' OR s.surname LIKE ? ESCAPE '\\')")
+        args += [like(q)] * 4
     if args_src.get("class_id"):
         where.append("a.class_id=?")
         args.append(int(args_src["class_id"]))
@@ -89,7 +98,7 @@ def list_students():
             "LEFT JOIN classes c ON c.id=a.class_id LEFT JOIN academic_years y ON y.id=a.academic_year_id")
     total = scalar(f"SELECT COUNT(*) {base} WHERE {where}", args, 0)
     items = rows(
-        f"SELECT s.id, s.admission_no, s.full_name, s.gender, s.date_of_birth, s.status, s.admission_date, s.guardian_name, "
+        f"SELECT s.id, s.admission_no, s.full_name, s.first_name, s.middle_name, s.surname, s.gender, s.date_of_birth, s.status, s.admission_date, s.guardian_name, "
         f"s.guardian_contact, (s.photo_path IS NOT NULL) AS has_photo, c.id AS class_id, c.name AS class_name, "
         f"y.id AS year_id, y.name AS year_name {base} WHERE {where} ORDER BY {sort} {direction}, s.id LIMIT ? OFFSET ?",
         (*args, per, (page - 1) * per))
@@ -109,13 +118,15 @@ def create_student():
     year_id = d.get("academic_year_id") or _current_year_id()
     if not year_id or scalar("SELECT 1 FROM academic_years WHERE id=?", (year_id,)) is None:
         raise ApiError(422, "Set up an academic year first (Settings).", fields={"academic_year_id": "No academic year."})
-    if scalar("SELECT 1 FROM students WHERE admission_no=?", (data["admission_no"],)):
-        raise ApiError(409, "That admission number is already registered.", fields={"admission_no": "Already registered."})
+    if data["admission_no"] and scalar("SELECT 1 FROM students WHERE admission_no=?", (data["admission_no"],)):
+        raise ApiError(409, "That student ID is already registered.", fields={"admission_no": "Already registered."})
     with tx():
+        if not data["admission_no"]:
+            data["admission_no"] = names.next_student_id(scalar)
         sid = insert(
-            "INSERT INTO students(admission_no, full_name, date_of_birth, gender, guardian_name, guardian_contact, address, admission_date, status) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            (data["admission_no"], data["full_name"], data["date_of_birth"], data["gender"], data["guardian_name"],
+            "INSERT INTO students(admission_no, full_name, first_name, middle_name, surname, date_of_birth, gender, guardian_name, guardian_contact, address, admission_date, status) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (data["admission_no"], data["full_name"], data["first_name"], data["middle_name"], data["surname"], data["date_of_birth"], data["gender"], data["guardian_name"],
              data["guardian_contact"], data["address"], data["admission_date"], data["status"]))
         insert("INSERT INTO student_class_assignments(student_id, class_id, academic_year_id, start_date, is_current) VALUES (?,?,?,?,1)",
                (sid, class_id, int(year_id), data["admission_date"]))
@@ -219,15 +230,18 @@ def student_attendance(sid):
 def update_student(sid):
     u = current_user()
     before = require_student(u, sid)
-    data = _student_fields(body(), False)
+    d_in = body()
+    if not (d_in.get("admission_no") or "").strip():
+        d_in["admission_no"] = before["admission_no"]
+    data = _student_fields(d_in, False)
     if scalar("SELECT 1 FROM students WHERE admission_no=? AND id!=?", (data["admission_no"], sid)):
-        raise ApiError(409, "That admission number is already registered.", fields={"admission_no": "Already registered."})
+        raise ApiError(409, "That student ID is already registered.", fields={"admission_no": "Already registered."})
     changed = {k: {"from": before[k], "to": data[k]} for k in data if before.get(k) != data[k]}
     with tx():
         execute(
-            "UPDATE students SET admission_no=?, full_name=?, date_of_birth=?, gender=?, guardian_name=?, guardian_contact=?, "
+            "UPDATE students SET admission_no=?, full_name=?, first_name=?, middle_name=?, surname=?, date_of_birth=?, gender=?, guardian_name=?, guardian_contact=?, "
             "address=?, admission_date=?, status=?, updated_at=? WHERE id=?",
-            (data["admission_no"], data["full_name"], data["date_of_birth"], data["gender"], data["guardian_name"],
+            (data["admission_no"], data["full_name"], data["first_name"], data["middle_name"], data["surname"], data["date_of_birth"], data["gender"], data["guardian_name"],
              data["guardian_contact"], data["address"], data["admission_date"], data["status"], utcnow_iso(), sid))
         if changed:
             audit("student.update", "student", sid, changed)
@@ -266,7 +280,8 @@ def set_status(sid):
     s = require_student(u, sid)
     status = V(body()).enum("status", STATUSES, "Status").done()["status"]
     with tx():
-        execute("UPDATE students SET status=?, updated_at=? WHERE id=?", (status, utcnow_iso(), sid))
+        execute("UPDATE students SET status=?, archived_at=CASE WHEN ?='archived' THEN ? ELSE NULL END, updated_at=? WHERE id=?",
+                (status, status, utcnow_iso(), utcnow_iso(), sid))
         audit("student.status", "student", sid, {"from": s["status"], "to": status})
     return jsonify({"student": _profile_core(sid)})
 

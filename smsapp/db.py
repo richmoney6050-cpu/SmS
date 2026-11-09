@@ -88,16 +88,24 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         if path.name in done:
             continue
         script = path.read_text(encoding="utf-8")
+        rebuild = script.startswith("-- no-foreign-keys")
+        if rebuild:  # table rebuilds must not trigger ON DELETE CASCADE on child tables
+            conn.execute("PRAGMA foreign_keys=OFF")
         conn.execute("BEGIN IMMEDIATE")
         try:
             # executescript() would COMMIT first, so split statements ourselves.
             for stmt in _split_sql(script):
                 conn.execute(stmt)
             conn.execute("INSERT INTO schema_migrations(name) VALUES (?)", (path.name,))
+            if rebuild and conn.execute("PRAGMA foreign_key_check").fetchall():
+                raise RuntimeError(f"Migration {path.name} would break foreign keys")
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
             raise
+        finally:
+            if rebuild:
+                conn.execute("PRAGMA foreign_keys=ON")
         applied.append(path.name)
     return applied
 

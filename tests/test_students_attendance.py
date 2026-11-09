@@ -19,7 +19,7 @@ def test_duplicate_admission_number_rejected(admin, school):
 
 def test_student_validation(admin, school):
     r = admin.post("/api/students", {"admission_no": "", "full_name": "", "class_id": school["class"]["A"]})
-    assert r.status_code == 422 and r.j["error"]["fields"]["full_name"]
+    assert r.status_code == 422 and r.j["error"]["fields"]["first_name"]
 
 
 def test_transfer_deactivate_delete(admin, school):

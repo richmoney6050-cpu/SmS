@@ -25,9 +25,9 @@ def attendance_rate(present: int, late: int, absent: int):
 
 def active_class_students(class_id: int) -> list[dict]:
     return rows(
-        "SELECT s.id, s.full_name, s.admission_no, s.gender FROM student_class_assignments a "
+        "SELECT s.id, s.full_name, s.first_name, s.middle_name, s.surname, s.admission_no, s.gender FROM student_class_assignments a "
         "JOIN students s ON s.id = a.student_id WHERE a.class_id=? AND a.is_current=1 AND s.status='active' "
-        "ORDER BY s.full_name COLLATE NOCASE", (class_id,))
+        "ORDER BY CASE s.gender WHEN 'female' THEN 0 WHEN 'male' THEN 1 ELSE 2 END, s.surname COLLATE NOCASE, s.first_name COLLATE NOCASE, s.id", (class_id,))
 
 
 def active_counts_by_class() -> dict[int, int]:

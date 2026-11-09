@@ -50,7 +50,19 @@ def _pct(v):
 
 
 def _respond(doc: dict, filename: str):
-    if request.args.get("format") == "pdf":
+    fmt = request.args.get("format")
+    if fmt in ("xlsx", "csv"):
+        from .. import exporter
+
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", filename).strip("_") or "report"
+        with tx():
+            audit("report." + fmt, doc["kind"], None, {"title": doc["title"]})
+        if fmt == "xlsx":
+            return Response(exporter.doc_to_xlsx(doc), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            headers={"Content-Disposition": f'attachment; filename="{safe}.xlsx"', "Cache-Control": "no-store"})
+        return Response(exporter.doc_to_csv(doc), mimetype="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{safe}.csv"', "Cache-Control": "no-store"})
+    if fmt == "pdf":
         logo = settings.get_raw("logo_file")
         logo_path = str(tenancy.upload_dir() / "branding" / Path(logo).name) if logo else None
         data = render_pdf(doc, logo_path)

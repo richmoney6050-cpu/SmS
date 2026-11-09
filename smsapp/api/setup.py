@@ -143,7 +143,8 @@ def delete_year(yid):
 
 def _term_data():
     d = body()
-    data = V(d).int("year_id", "Academic year").str("name", "Name", max_len=40).date("start_date", "Start date").date("end_date", "End date").bool("is_current").done()
+    data = (V(d).int("year_id", "Academic year").str("name", "Name", max_len=40).date("start_date", "Start date").date("end_date", "End date").bool("is_current")
+            .int("weeks", "Number of weeks", required=False, min_value=1, max_value=30, default=13).done())
     year = row("SELECT * FROM academic_years WHERE id=?", (data["year_id"],))
     if year is None:
         raise ApiError(422, "Choose a valid academic year.", fields={"year_id": "Unknown year."})
@@ -174,8 +175,8 @@ def create_term():
             execute("UPDATE academic_terms SET is_current=0")
             execute("UPDATE academic_years SET is_current=0")
             execute("UPDATE academic_years SET is_current=1 WHERE id=?", (data["year_id"],))
-        tid = insert("INSERT INTO academic_terms(year_id,name,start_date,end_date,is_current) VALUES (?,?,?,?,?)",
-                     (data["year_id"], data["name"], data["start_date"], data["end_date"], int(data["is_current"])))
+        tid = insert("INSERT INTO academic_terms(year_id,name,start_date,end_date,is_current,weeks) VALUES (?,?,?,?,?,?)",
+                     (data["year_id"], data["name"], data["start_date"], data["end_date"], int(data["is_current"]), data["weeks"]))
         audit("term.create", "academic_term", tid, data)
     return jsonify({"years": _year_payload()}), 201
 
@@ -190,8 +191,8 @@ def update_term(tid):
         raise ApiError(409, "That year already has a term with this name.", fields={"name": "Already exists."})
     _check_term_overlap(data, tid)
     with tx():
-        execute("UPDATE academic_terms SET year_id=?, name=?, start_date=?, end_date=? WHERE id=?",
-                (data["year_id"], data["name"], data["start_date"], data["end_date"], tid))
+        execute("UPDATE academic_terms SET year_id=?, name=?, start_date=?, end_date=?, weeks=? WHERE id=?",
+                (data["year_id"], data["name"], data["start_date"], data["end_date"], data["weeks"], tid))
         audit("term.update", "academic_term", tid, data)
     return jsonify({"years": _year_payload()})
 

@@ -364,4 +364,24 @@ def current_issues() -> list[dict]:
                        "title": f"Repeated absence: {r['full_name']}",
                        "message": f"{r['full_name']} ({r['class_name']}) has been absent {r['n']} times in the last {within} days.",
                        "class_id": r["class_id"], "student_id": r["student_id"]})
+
+    # 7. Term absence warning (weekly register): "Attendance Warning: This student has been absent N times."
+    from . import register as reg
+
+    try:
+        term = reg.resolve_term()
+    except Exception:
+        term = None
+    if term:
+        step = max(settings.get("absence_warning_count"), 1)
+        for w in reg.all_warnings(term):
+            level = w["absences"] // step
+            dates = ", ".join(w["dates"][:12]) + ("..." if len(w["dates"]) > 12 else "")
+            pct_txt = f"{w['percent']:g}%" if w["percent"] is not None else "n/a"
+            issues.append({"key": f"term_absence:{w['student_id']}:{term['id']}:{level}", "type": "absence_warning",
+                           "severity": "critical" if w["absences"] >= step * 2 else "warning",
+                           "title": f"Attendance Warning: {w['full_name']}",
+                           "message": f"Attendance Warning: This student has been absent {w['absences']} times. {w['full_name']} ({w['class_name']}), "
+                                      f"attendance {pct_txt} this term. Absent on: {dates}.",
+                           "class_id": w["class_id"], "student_id": w["student_id"]})
     return issues

@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, current_app, g, jsonify, request, send_file, session
 
-from .. import mailer, settings, tenancy
+from .. import mailer, register as register_mod, settings, tenancy
 from ..audit import audit, log_activity
 from ..db import execute, row, scalar, tx
 from ..security import (
@@ -153,6 +153,7 @@ def register():
             execute("INSERT INTO school_settings(key, value, updated_at, updated_by) VALUES ('school_name', ?, ?, ?)",
                     (data["school_name"], utcnow_iso(), uid))
             code = _store_recovery(uid)
+            register_mod.bootstrap_calendar()
             audit("school.registered", "school", sch["id"], {"username": username}, user={"id": uid, "full_name": data["full_name"]})
     except BaseException:
         tenancy.unindex_user(username)

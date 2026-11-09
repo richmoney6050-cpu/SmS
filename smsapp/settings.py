@@ -17,6 +17,7 @@ DEFS = {
     "attendance_deadline": ("time", "10:00", "Attendance deadline", "Attendance", "Attendance recorded after this time is shown as missing."),
     "late_counts_as_present": ("bool", "1", "Count 'late' as attended", "Attendance", "Used in every attendance percentage."),
     "attendance_edit_days": ("int", "7", "Teacher edit window (days)", "Attendance", "Teachers can correct their own attendance for this many days."),
+    "absence_warning_count": ("int", "5", "Absence warning at (days this term)", "Attendance", "A student with this many absences in the term gets an Attendance Warning."),
     "poor_attendance_threshold": ("float", "75", "Poor attendance below (%)", "Alerts", "Classes and students under this rate are flagged."),
     "poor_attendance_window_days": ("int", "14", "Poor attendance window (school days)", "Alerts", ""),
     "frequent_absence_count": ("int", "3", "Repeated absence: absences", "Alerts", "Student is flagged at this many absences..."),

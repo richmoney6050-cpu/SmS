@@ -9,7 +9,7 @@ from .db import execute, insert, rows, tx
 from .util import utcnow_iso
 
 _lock = threading.Lock()
-_last_run = 0.0
+_last_run: dict[int, float] = {}
 
 
 def sync(force: bool = False) -> dict:
@@ -18,9 +18,11 @@ def sync(force: bool = False) -> dict:
     * An issue that already has an open notification is not raised again (no duplicates).
     * A notification whose issue has cleared is resolved automatically.
     """
-    global _last_run
+    from .tenancy import require_school
+
+    sid = require_school()["id"]
     now = time.monotonic()
-    if not force and not current_app.config.get("TESTING") and now - _last_run < 15:
+    if not force and not current_app.config.get("TESTING") and now - _last_run.get(sid, 0.0) < 15:
         return {"created": 0, "resolved": 0, "skipped": True}
     with _lock:
         issues = monitor.current_issues()
@@ -41,5 +43,5 @@ def sync(force: bool = False) -> dict:
                 if key not in keys:
                     execute("UPDATE notifications SET resolved_at=? WHERE id=?", (ts, nid))
                     resolved += 1
-        _last_run = time.monotonic()
+        _last_run[sid] = time.monotonic()
     return {"created": created, "resolved": resolved}
