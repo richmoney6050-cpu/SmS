@@ -29,7 +29,7 @@ function toggleTheme() {
   const next = currentTheme() === "dark" ? "light" : "dark";
   applyTheme(next);
   try { localStorage.setItem("sms-theme", next); } catch { /* ignore */ }
-  render(); // charts read CSS variables, so redraw
+  if (state.user) render(); else showAuth(); // charts read CSS variables, so redraw
 }
 
 // ------------------------------------------------------------ routes
@@ -75,8 +75,22 @@ function logoNode(cls) {
   return h("div", { class: cls }, state.school?.has_logo ? h("img", { src: "/api/auth/school-logo?v=" + Date.now(), alt: "" }) : initials(state.school?.name || "S"));
 }
 
+const themeBtn = () => h("button", { class: "btn ghost sm theme-float", type: "button", "aria-label": "Switch between light and dark mode", onclick: toggleTheme }, icon(currentTheme() === "dark" ? "sun" : "moon"), currentTheme() === "dark" ? "Light mode" : "Dark mode");
+
+function showWelcomePage() {
+  mount(root, h("div", { class: "welcome" }, themeBtn(),
+    h("div", { class: "welcome-card" },
+      h("div", { class: "welcome-logo" }, logoNode("logo-lg")),
+      h("h1", null, "Welcome to School Management System"),
+      h("p", null, "A smarter and simpler way to manage students, attendance, examinations and school reports."),
+      h("div", { class: "welcome-actions" },
+        h("a", { class: "btn primary lg", href: "#/login" }, icon("login"), "Sign In"),
+        h("a", { class: "btn lg", href: "#/register" }, icon("plus"), "Create Account")),
+      h("ul", { class: "welcome-points" }, ["Students and classes", "Weekly attendance registers", "Examinations and positions", "Report cards and school-wide monitoring"].map((t) => h("li", null, icon("check"), t))))));
+}
+
 function authLayout(title, subtitle, form) {
-  mount(root, h("div", { class: "auth" },
+  mount(root, h("div", { class: "auth" }, themeBtn(),
     h("div", { class: "auth-hero" },
       h("div", { class: "row" }, logoNode("logo-lg"), h("div", null, h("b", { style: { fontSize: "1.2rem" } }, state.school?.name || "School"), state.school?.motto ? h("div", { class: "small", style: { color: "var(--navy-muted)" } }, state.school.motto) : null)),
       h("div", null, h("h1", null, "Every class, every record, one clear view."), h("p", null, "Student records, attendance, examinations and reports in one secure place, with a central command centre for school leaders.")),
@@ -110,14 +124,14 @@ function copyButton(text, label = "Copy") {
   return h("button", { class: "btn sm", type: "button", onclick: async (e) => { try { await navigator.clipboard.writeText(text); e.currentTarget.textContent = "Copied"; } catch { toast("Copy is not available here. Select the text and copy it.", "warn"); } } }, icon("copy"), label);
 }
 
-function authRoute() { const name = location.hash.replace(/^#\/?/, "").split("?")[0]; return ["register", "forgot", "reset", "verify"].includes(name) ? name : "login"; }
+function authRoute() { const name = location.hash.replace(/^#\/?/, "").split("?")[0]; return ["register", "forgot", "reset", "verify", "login"].includes(name) ? name : "welcome"; }
 function hashToken() { const i = location.hash.indexOf("?"); return new URLSearchParams(i < 0 ? "" : location.hash.slice(i + 1)).get("token") || ""; }
 
 function showAuth() {
   state.user = null; state.cleanup?.(); state.cleanup = null;
   const r = authRoute();
   document.title = "School Management System";
-  ({ login: showLogin, register: showRegister, forgot: showForgot, reset: showReset, verify: showVerify }[r])();
+  ({ welcome: showWelcomePage, login: showLogin, register: showRegister, forgot: showForgot, reset: showReset, verify: showVerify }[r])();
 }
 window.addEventListener("hashchange", () => { if (!state.user) showAuth(); });
 
@@ -164,7 +178,7 @@ function showRegister() {
       showWelcome(r);
     } catch (err) { applyErrors(form, err); if (!(err instanceof ApiError)) errorToast(err); }
     finally { submit.removeAttribute("aria-busy"); }
-  } }, school, full, preview, email, pw.node, pw2.node, submit, h("div", { class: "linkrow" }, h("span", { class: "muted" }, "Already registered?"), h("a", { href: "#/" }, "Sign in")));
+  } }, school, full, preview, email, pw.node, pw2.node, submit, h("div", { class: "linkrow" }, h("span", { class: "muted" }, "Already registered?"), h("a", { href: "#/login" }, "Sign in")));
   authLayout("Register your school", "Create your school's private workspace in a minute. You will be its Headmaster / School Administrator.", form);
   school.querySelector("input").focus();
 }
@@ -188,7 +202,7 @@ function showForgot() {
     try { const r = await post("/api/auth/forgot-password", { username: user.querySelector("input").value }); mount(msg, notice(r.message, "good", "check")); }
     catch (err) { applyErrors(form, err); if (!(err instanceof ApiError)) errorToast(err); }
   } }, user, button("Send reset link", { kind: "primary", type: "submit" }), msg,
-  h("div", { class: "linkrow" }, h("a", { href: "#/reset" }, "I have a recovery code"), h("a", { href: "#/" }, "Back to sign in")));
+  h("div", { class: "linkrow" }, h("a", { href: "#/reset" }, "I have a recovery code"), h("a", { href: "#/login" }, "Back to sign in")));
   authLayout("Forgot your password?", "Enter your username. If email is set up for your account we will send a reset link. Teachers can also ask their School Administrator to reset it.", form);
 }
 
@@ -205,9 +219,9 @@ function showReset() {
       mount(root, h("div", { class: "auth" }, h("div", { class: "auth-pane", style: { gridColumn: "1 / -1" } }, h("div", { class: "auth-card stack" }, h("h1", null, "Password changed"),
         h("p", null, "You can now sign in with your new password."),
         r.new_recovery_code ? h("div", null, h("div", { class: "small muted" }, "Your new recovery code (the old one no longer works)"), h("div", { class: "code-box" }, r.new_recovery_code), h("div", { style: { marginTop: "6px" } }, copyButton(r.new_recovery_code))) : null,
-        h("a", { class: "btn primary", href: "#/" }, "Go to sign in")))));
+        h("a", { class: "btn primary", href: "#/login" }, "Go to sign in")))));
     } catch (err) { applyErrors(form, err); if (!(err instanceof ApiError)) errorToast(err); }
-  } }, token ? null : user, token ? null : code, pw.node, pw2.node, button("Set new password", { kind: "primary", type: "submit" }), h("a", { href: "#/" }, "Back to sign in"));
+  } }, token ? null : user, token ? null : code, pw.node, pw2.node, button("Set new password", { kind: "primary", type: "submit" }), h("a", { href: "#/login" }, "Back to sign in"));
   authLayout("Set a new password", token ? "Choose a new password for your account." : "Enter your username and the recovery code you saved when you registered.", form);
 }
 
@@ -215,8 +229,8 @@ async function showVerify() {
   const token = hashToken();
   authLayout("Confirming your email", "", h("div", { class: "loading" }, h("span", { class: "spinner" }), "Please wait..."));
   let body;
-  try { await post("/api/auth/verify-email", { token }); body = h("div", { class: "stack" }, notice("Your email address is confirmed. Thank you.", "good", "check"), h("a", { class: "btn primary", href: "#/" }, "Continue")); }
-  catch (e) { body = h("div", { class: "stack" }, notice(e.message, "bad", "alert"), h("a", { class: "btn", href: "#/" }, "Back to sign in")); }
+  try { await post("/api/auth/verify-email", { token }); body = h("div", { class: "stack" }, notice("Your email address is confirmed. Thank you.", "good", "check"), h("a", { class: "btn primary", href: "#/login" }, "Continue")); }
+  catch (e) { body = h("div", { class: "stack" }, notice(e.message, "bad", "alert"), h("a", { class: "btn", href: "#/login" }, "Back to sign in")); }
   authLayout("Email confirmation", "", body);
 }
 

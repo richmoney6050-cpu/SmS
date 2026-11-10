@@ -333,6 +333,14 @@ def save_marks(eid):
     u = current_user()
     exam = _get_exam(eid)
     d = body()
+    prep = _prepare_marks(u, eid, exam, d)
+    with tx():
+        out = _write_marks(u, exam, prep)
+    return jsonify({"ok": True, **out})
+
+
+def _prepare_marks(u, eid, exam, d):
+    """Validate one subject's marks (access, state, every value). Raises ApiError; writes nothing."""
     class_id = require_class(u, d.get("class_id"))
     subject_id = d.get("subject_id")
     if not isinstance(subject_id, int):
@@ -382,8 +390,14 @@ def save_marks(eid):
                 plan.append((sid, cid, round(val, 2)))
     if errors:
         raise ApiError(422, f"{len(errors)} mark(s) are not valid. Nothing was saved.", code="validation", fields=errors)
+    return {"es": es, "plan": plan, "class_id": class_id, "subject_id": subject_id}
+
+
+def _write_marks(u, exam, prep):
+    """Write validated marks. The caller owns the transaction."""
+    es, plan, class_id, subject_id = prep["es"], prep["plan"], prep["class_id"], prep["subject_id"]
     now = utcnow_iso()
-    with tx():
+    if True:
         had_any = scalar("SELECT 1 FROM examination_results WHERE examination_subject_id=? LIMIT 1", (es["id"],)) is not None
         added = changed = cleared = 0
         for sid, cid, val in plan:
@@ -406,6 +420,101 @@ def save_marks(eid):
                                                                   "added": added, "changed": changed, "cleared": cleared})
             if es["status"] == "submitted" and "marks.edit_any" in u["perms"]:
                 audit("marks.edit_submitted", "examination_subject", es["id"], {"exam": exam["name"]})
+    return {"added": added, "changed": changed, "cleared": cleared}
+
+
+# ---------------------------------------------------------- one student, all subjects
+def _student_in_class(class_id: int, student_id: int) -> dict:
+    st = next((x for x in calc.active_class_students(class_id) if x["id"] == student_id), None)
+    if st is None:
+        raise ApiError(404, "That student is not registered in this class.")
+    return st
+
+
+@bp.get("/<int:eid>/class-students")
+@require("exams.view")
+def class_students(eid):
+    """Every student registered in the class, with how many of the class's subjects have complete marks."""
+    u = current_user()
+    exam = _get_exam(eid)
+    class_id = require_class(u, arg_int("class_id"))
+    data = calc.load_exam(eid, [class_id])
+    subs = [s for s in data["subjects"] if s["class_id"] == class_id]
+    out = []
+    for st in calc.active_class_students(class_id):
+        mine = [e for e in data["entries"] if e["student_id"] == st["id"] and e["class_id"] == class_id]
+        out.append({"id": st["id"], "name": st["full_name"], "admission_no": st["admission_no"], "gender": st["gender"],
+                    "subjects": len(subs), "complete": sum(1 for e in mine if e["complete"]),
+                    "partial": sum(1 for e in mine if e["entered"] and not e["complete"])})
+    return jsonify({"exam": {"id": eid, "name": exam["name"], "status": exam["status"]}, "subjects": len(subs), "students": out})
+
+
+@bp.get("/<int:eid>/student-marks")
+@require("exams.view")
+def student_marks(eid):
+    u = current_user()
+    exam = _get_exam(eid)
+    class_id = require_class(u, arg_int("class_id"))
+    student = _student_in_class(class_id, arg_int("student_id"))
+    data = calc.load_exam(eid, [class_id])
+    comps = data["components"]
+    subjects = []
+    tot = mx = 0.0
+    for sub in sorted((s for s in data["subjects"] if s["class_id"] == class_id), key=lambda s: s["subject_name"].lower()):
+        es = _es(eid, class_id, sub["subject_id"])
+        e = next((x for x in data["entries"] if x["es_id"] == es["id"] and x["student_id"] == student["id"]), None) or {}
+        can, reason = _edit_state(u, exam, es)
+        subjects.append({"subject_id": sub["subject_id"], "subject_name": sub["subject_name"], "scores": e.get("scores", {}),
+                         "ca_total": e.get("ca_total"), "exam_total": e.get("exam_total"), "total": e.get("total"), "percent": e.get("percent"),
+                         "grade": e.get("grade"), "remark": e.get("remark"), "complete": e.get("complete", False),
+                         "status": es["status"], "can_edit": can, "edit_reason": reason})
+        if e.get("complete"):
+            tot += e["total"]
+            mx += data["max_total"]
+    return jsonify({
+        "exam": {"id": eid, "name": exam["name"], "status": exam["status"], "term": exam["term_name"], "year": exam["year_name"]},
+        "class": {"id": class_id, "name": scalar("SELECT name FROM classes WHERE id=?", (class_id,))},
+        "student": {"id": student["id"], "name": student["full_name"], "admission_no": student["admission_no"]},
+        "components": comps, "max_total": data["max_total"], "subjects": subjects,
+        "overall": {"total": round(tot, 2), "max": round(mx, 2), "percent": round(tot / mx * 100, 2) if mx else None},
+    })
+
+
+@bp.put("/<int:eid>/student-marks")
+@require("exams.enter_marks", "marks.edit_any", any_of=True)
+def save_student_marks(eid):
+    """Save one student's marks for several subjects in a single all-or-nothing transaction."""
+    u = current_user()
+    exam = _get_exam(eid)
+    d = body()
+    class_id = require_class(u, d.get("class_id"))
+    student_id = d.get("student_id")
+    if not isinstance(student_id, int):
+        raise ApiError(422, "Choose a student.")
+    _student_in_class(class_id, student_id)
+    items = d.get("subjects")
+    if not isinstance(items, list) or not items:
+        raise ApiError(422, "There are no marks to save.")
+    preps, errors = [], {}
+    for it in items:
+        if not isinstance(it, dict):
+            raise ApiError(422, "Invalid marks payload.")
+        try:
+            preps.append(_prepare_marks(u, eid, exam, {"class_id": class_id, "subject_id": it.get("subject_id"),
+                                                       "rows": [{"student_id": student_id, "scores": it.get("scores") or {}}]}))
+        except ApiError as e:
+            if e.code == "validation":
+                for k, v in (e.fields or {}).items():
+                    errors[f"{it.get('subject_id')}:{k.split(':')[1]}"] = v
+            else:
+                raise
+    if errors:
+        raise ApiError(422, f"{len(errors)} mark(s) are not valid. Nothing was saved.", code="validation", fields=errors)
+    added = changed = cleared = 0
+    with tx():
+        for pr in preps:
+            o = _write_marks(u, exam, pr)
+            added += o["added"]; changed += o["changed"]; cleared += o["cleared"]
     return jsonify({"ok": True, "added": added, "changed": changed, "cleared": cleared})
 
 

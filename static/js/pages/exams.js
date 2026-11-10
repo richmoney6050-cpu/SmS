@@ -2,6 +2,7 @@
 import { ApiError, del, get, post, put } from "../lib/api.js";
 import { barChart, hbarChart } from "../lib/charts.js";
 import { applyErrors, badge, button, card, confirmDialog, dataTable, empty, errorToast, field, fmtDate, fmtNum, fmtPct, h, icon, input, load, modal, mount, named, notice, pageHead, select, stat, statusBadge, tabs, toast, ord } from "../lib/ui.js";
+import { entryTab } from "./marksentry.js";
 import { compareCard } from "./acadmon.js";
 import { backLink, classOptions, gradeBadge, studentLink, termOptions, yearOptions } from "./common.js";
 
@@ -12,12 +13,13 @@ export async function render(ctx, view, params) {
 // ------------------------------------------------------------ list
 async function list(ctx, view) {
   const meta = ctx.meta;
-  let active = "exams";
+  let active = "entry";
   const panel = h("div", { class: "view" }), nav = h("div");
   const actions = ctx.can("exams.manage") ? button("Create examination", { kind: "primary", ico: "plus", onClick: () => createDialog(ctx, () => drawPanel()) }) : null;
-  const items = [["exams", "Examinations", "exam"], ["compare", "Compare performance", "chart"]];
+  const items = [["entry", "Enter marks", "edit"], ["exams", "Examinations", "exam"], ["compare", "Compare performance", "chart"]];
   const drawNav = () => mount(nav, tabs(items.map(([i, l, ic]) => ({ id: i, label: l, icon: ic })), active, (t) => { active = t; drawNav(); drawPanel(); }));
   async function drawPanel() {
+    if (active === "entry") return mount(panel, entryTab(ctx));
     if (active === "compare") return load(panel, async () => { const r = await get("/api/exams"); return compareCard(ctx, { exam_options: r.exams.map((e) => ({ id: e.id, name: e.name })) }); });
     const term = select(termOptions(meta), ""), year = select(yearOptions(meta), "");
     const out = h("div");
