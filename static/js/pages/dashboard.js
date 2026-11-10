@@ -122,6 +122,7 @@ async function alertsView(ctx, body) {
 // ------------------------------------------------------------ teacher dashboard
 async function renderTeacher(ctx, view) {
   const d = await get("/api/dashboard/teacher");
+  const ann = await announcementsCard();
   const taskIcon = (t) => (t.type === "attendance" ? "calendar" : "exam");
   const tasks = d.tasks.length ? h("ul", { class: "list" }, d.tasks.map((t) => h("li", null, h("span", { class: "feed-ico " + (t.overdue ? "critical alert" : "alert") }, icon(taskIcon(t))), h("div", { class: "grow" }, t.text, t.overdue ? h("div", null, badge("Overdue", "bad", "alert")) : null),
     h("a", { class: "btn sm primary", href: t.type === "attendance" ? `#/attendance?class=${t.class_id}` : `#/exams/${t.exam_id}?class=${t.class_id}&subject=${t.subject_id}` }, t.type === "attendance" ? "Record" : "Enter marks")))) : empty("You are up to date", "No tasks are waiting for you.", "check");
@@ -133,6 +134,7 @@ async function renderTeacher(ctx, view) {
   mount(view, pageHead(`Hello, ${ctx.user.full_name.split(" ").slice(0, 2).join(" ")}`, `${new Date(d.date + "T00:00:00").toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}${d.is_school_day ? ` | attendance is due by ${d.deadline}` : " | not a school day"}`),
     h("div", { class: "stack view" },
       h("div", { class: "grid g-stats" }, stat({ label: "My classes", value: new Set(d.assignments.map((a) => a.class_id)).size, ico: "school" }), stat({ label: "Tasks to do", value: d.tasks.length, ico: "clock", tone: d.tasks.length ? "warn" : "good" }), stat({ label: "Marks lists submitted", value: `${d.marks_progress.submitted}/${d.marks_progress.total}`, ico: "exam" })),
+      ann,
       h("div", { class: "grid g-main" }, card("My tasks", tasks, { flush: true }), card("Recent activity", activityFeed(d.recent_activity, { empty: "Nothing recorded yet." }), { flush: true })),
       h("h2", null, "My classes"), classes));
 }
