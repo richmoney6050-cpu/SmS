@@ -369,6 +369,19 @@ def logout():
     return jsonify({"ok": True, "csrf": ensure_csrf()})
 
 
+@bp.put("/preferences")
+@require()
+def save_preferences():
+    """Save the signed-in user's appearance settings so they follow the account across devices."""
+    from .. import prefs
+
+    u = current_user()
+    clean = prefs.clean(body())
+    with tx():
+        execute("UPDATE users SET ui_prefs=? WHERE id=?", (prefs.dump(clean), u["id"]))
+    return jsonify({"ok": True, "ui_prefs": clean})
+
+
 @bp.post("/change-password")
 @require()
 def change_password():

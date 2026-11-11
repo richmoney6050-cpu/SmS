@@ -167,7 +167,10 @@ def current_user(optional: bool = True):
 
 
 def public_user(u: dict) -> dict:
+    from . import prefs
+
     return {
+        "ui_prefs": prefs.load(scalar("SELECT ui_prefs FROM users WHERE id=?", (u["id"],))),
         "id": u["id"],
         "username": u["username"],
         "full_name": u["full_name"],

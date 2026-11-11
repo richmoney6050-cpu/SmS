@@ -12,10 +12,11 @@ const TABS = [
   { id: "settings", label: "Settings and branding", icon: "settings", perm: ["settings.manage"], fn: () => settingsTab },
   { id: "audit", label: "Audit log", icon: "shield", perm: ["audit.view"], fn: () => auditTab },
   { id: "backups", label: "Backups", icon: "database", perm: ["backups.manage"], fn: () => backupsTab },
+  { id: "appearance", label: "Appearance & themes", icon: "palette", perm: null, fn: () => async (ctx, root) => (await import("./appearance.js")).draw(ctx, root) },
 ];
 
 export async function render(ctx, view, params) {
-  const avail = TABS.filter((t) => ctx.canAny(...t.perm));
+  const avail = TABS.filter((t) => !t.perm || ctx.canAny(...t.perm));
   let active = avail.find((t) => t.id === params[0])?.id || avail[0]?.id;
   if (!active) return mount(view, pageHead("Administration"), card(null, empty("No access", "Your account has no administration permissions.", "shield")));
   const nav = h("div"), panel = h("div", { class: "view" });

@@ -1,6 +1,7 @@
 // Application shell: authentication, navigation, theme, and page routing.
 import { ApiError, events, get, post, put, setCsrf } from "./lib/api.js";
 import { button, clear, confirmDialog, errorToast, field, h, icon, initials, input, applyErrors, named, modal, mount, setTimezone, toast, loading, notice } from "./lib/ui.js";
+import { applyPrefs, getPrefs, isDark, saveLocal } from "./lib/themes.js";
 
 const root = document.getElementById("app");
 const state = { user: null, school: null, meta: null, cleanup: null, alerts: 0, navOpen: false };
@@ -16,20 +17,18 @@ const ctx = {
 };
 
 // ------------------------------------------------------------ theme
-function applyTheme(t) {
-  if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
-  else document.documentElement.removeAttribute("data-theme");
+const currentTheme = () => (isDark() ? "dark" : "light");
+// Quick light/dark switch in the top bar. The colour theme the user picked is kept; only the mode changes.
+async function toggleTheme() {
+  const p = getPrefs();
+  p.mode = isDark() ? "light" : "dark";
+  applyPrefs(p); saveLocal(p);
+  if (state.user) { state.user.ui_prefs = p; put("/api/auth/preferences", p).catch(() => {}); render(); } else showAuth();
 }
-function currentTheme() {
-  const a = document.documentElement.getAttribute("data-theme");
-  return a || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-}
-try { applyTheme(localStorage.getItem("sms-theme")); } catch { /* storage unavailable: follow the OS */ }
-function toggleTheme() {
-  const next = currentTheme() === "dark" ? "light" : "dark";
-  applyTheme(next);
-  try { localStorage.setItem("sms-theme", next); } catch { /* ignore */ }
-  if (state.user) render(); else showAuth(); // charts read CSS variables, so redraw
+// After sign-in the account's saved appearance wins over whatever this browser last used.
+function applySavedAppearance() {
+  const p = state.user?.ui_prefs;
+  if (p) { applyPrefs(p); saveLocal(p); }
 }
 
 // ------------------------------------------------------------ routes
@@ -39,6 +38,7 @@ const ROUTES = {
   attendance: { label: "Attendance", icon: "calendar", load: () => import("./pages/attendance.js"), perm: () => can("attendance.view") },
   exams: { label: "Examination", icon: "exam", load: () => import("./pages/exams.js"), perm: () => can("exams.view") },
   reports: { label: "Reports", icon: "chart", load: () => import("./pages/reports.js"), perm: () => canAny("reports.student", "reports.class", "reports.school") },
+  appearance: { label: "Appearance & Themes", icon: "palette", load: () => import("./pages/appearance.js"), perm: () => true, hidden: true },
   admin: { label: "Administration", icon: "settings", load: () => import("./pages/admin.js"), perm: () => canAny("users.manage", "roles.manage", "assignments.manage", "setup.manage", "grading.manage", "settings.manage", "audit.view", "backups.manage"), hidden: true },
 };
 const parseHash = () => { const p = (location.hash.replace(/^#\/?/, "") || "dashboard").split("?")[0].split("/").filter(Boolean).map(decodeURIComponent); return { name: p[0] || "dashboard", params: p.slice(1) }; };
@@ -57,6 +57,7 @@ async function boot() {
 }
 
 async function afterSignIn() {
+  applySavedAppearance();
   state.meta = await get("/api/meta");
   setCsrf((await get("/api/auth/me")).csrf);
   document.title = `${state.school.name} | School Management`;
@@ -307,9 +308,11 @@ function userMenu() {
         can("setup.manage") ? link("School setup", "school", "#/admin/setup") : null,
         can("grading.manage") ? link("Grading scales", "list", "#/admin/grading") : null,
         can("settings.manage") ? link("Settings and branding", "settings", "#/admin/settings") : null,
+        link("Appearance and themes", "palette", "#/admin/appearance"),
         can("audit.view") ? link("Audit log", "shield", "#/admin/audit") : null,
         can("backups.manage") ? link("Backups", "database", "#/admin/backups") : null,
         h("hr")] : null,
+      link("Appearance & themes", "palette", "#/appearance"),
       act(currentTheme() === "dark" ? "Switch to light mode" : "Switch to dark mode", currentTheme() === "dark" ? "sun" : "moon", toggleTheme),
       act("Change password", "key", changePasswordDialog),
       act("Sign out", "logout", signOut));

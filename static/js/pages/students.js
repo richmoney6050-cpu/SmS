@@ -23,12 +23,12 @@ async function list(ctx, view) {
   const yr = select(yearOptions(meta), ""), stat_ = select([["active", "Active"], ["inactive", "Inactive"], ["transferred", "Transferred"], ["graduated", "Graduated"], ["withdrawn", "Withdrawn"], ["archived", "Archived"], ["", "Any status"]], "active");
   const out = h("div");
   const exp = (format) => () => download("/api/students/export", { ...st, status: st.status || "any", format }, `students.${format}`).catch(errorToast);
-  const actions = h("div", { class: "row" },
+  const makeActions = () => h("div", { class: "row" },
     button("Excel", { ico: "download", sm: true, title: "Export the filtered list to Excel", onClick: exp("xlsx") }), button("PDF", { ico: "file", sm: true, onClick: exp("pdf") }), button("CSV", { sm: true, onClick: exp("csv") }),
     ctx.can("students.transfer") ? button("Promote class", { ico: "up", onClick: () => promoteDialog(ctx, () => draw()) }) : null,
     ctx.can("students.create") ? button("Import", { ico: "upload", onClick: () => importDialog(ctx, () => draw()) }) : null,
     ctx.can("students.create") ? button("Register student", { kind: "primary", ico: "plus", onClick: () => studentForm(ctx, null, () => draw()) }) : null);
-  mount(view, pageHead("Manage Students", "Register, find and manage student records.", actions), h("div", { class: "toolbar" }, h("div", { class: "search" }, icon("search"), search), field("Class", cls), field("Gender", gen), field("Academic year", yr), field("Status", stat_)), out);
+  mount(view, pageHead("Manage Students", "Register, find and manage student records.", makeActions()), h("div", { class: "toolbar" }, h("div", { class: "search" }, icon("search"), search), field("Class", cls), field("Gender", gen), field("Academic year", yr), field("Status", stat_)), out);
 
   async function draw() {
     Object.assign(st, { q: search.value.trim(), class_id: cls.value, gender: gen.value, year_id: yr.value, status: stat_.value });
@@ -43,7 +43,7 @@ async function list(ctx, view) {
         { key: "status", label: "Status", render: (s) => badge(cap(s.status), STATUS_TONE[s.status]) },
       ];
       const table = dataTable({ columns: cols, rows: r.items, sortKey: st.sort === "name" ? "name" : st.sort, sortDir: st.dir, server: (k, d) => { st.sort = k; st.dir = d; st.page = 1; draw(); }, onRow: (s) => { location.hash = `#/students/${s.id}`; },
-        empty: empty("No students found", search.value || cls.value || gen.value || yr.value ? "Try clearing a filter or search." : "Register your first student to get started.", "users", actions) });
+        empty: empty("No students found", search.value || cls.value || gen.value || yr.value ? "Try clearing a filter or search." : "Register your first student to get started.", "users", makeActions()) });
       const pager = h("div", { class: "pager" }, h("span", { class: "small muted" }, r.total ? `Showing ${(st.page - 1) * st.per_page + 1}-${Math.min(st.page * st.per_page, r.total)} of ${fmtNum(r.total)}` : "0 students"),
         h("div", { class: "row" }, button("Previous", { sm: true, ico: "chevronLeft", disabled: st.page <= 1, onClick: () => { st.page--; draw(); } }), h("span", { class: "small" }, `Page ${st.page} of ${pages}`), button("Next", { sm: true, disabled: st.page >= pages, onClick: () => { st.page++; draw(); } })));
       return card(null, h("div", null, table, r.total > st.per_page || st.page > 1 ? pager : h("div", { class: "pager" }, h("span", { class: "small muted" }, `${fmtNum(r.total)} student${r.total === 1 ? "" : "s"}`))), { flush: true });

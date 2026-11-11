@@ -63,6 +63,17 @@ Custom roles can be created, with any combination of 25 permissions. **Every per
 * **Grading scales are configurable** (Administration > Grading scales), not hard-coded.
 * **Declining performance** is flagged when a class's average falls by at least the configured number of points versus the previous examination.
 
+## Appearance & themes
+
+Every user can open **Appearance & themes** (user menu, or Settings > Appearance for admins) to pick one of 21 colour themes
+(Blue, Red, Yellow, Black, White, Green, Orange, Purple, Pink, Cyan, Teal, Midnight, Sunset, Ocean, Neon, Gradient, Lavender, Forest, Rose,
+Rainbow and Custom), choose Light / Dark / System default, switch on **Rainbow mode**, or build a custom theme from four colours.
+Choices preview live across the whole site and are saved with **Apply**; **Reset** returns to the default.
+
+- Design tokens (CSS variables) are generated in `static/js/lib/themes.js`; text colours are auto-adjusted to meet WCAG AA contrast (4.5:1) for any theme, including custom colours. `node tests/js/audit.mjs` verifies every theme in light and dark.
+- Preferences are stored per user in `users.ui_prefs` (migration 004) via `PUT /api/auth/preferences`, and cached in `localStorage` so login pages and first paint use the last look.
+- Server-generated PDFs keep their fixed, print-safe colours.
+
 ## Configuration
 
 All settings are environment variables (or a `.env` file, see `.env.example`).

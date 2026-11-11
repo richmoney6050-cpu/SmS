@@ -111,7 +111,7 @@ export function registerTab(ctx, root, setGuard) {
   function registerCard() {
     const nav = h("div", { class: "tabs", role: "tablist", "aria-label": "Weeks" },
       data.weeks.map((w) => h("button", { role: "tab", "aria-selected": state.view === "week" && state.week === w.week ? "true" : "false", onclick: () => { state.view = "week"; state.week = w.week; refreshView(); } },
-        `Week ${w.week}`, w.current ? h("span", { class: "count", style: { background: "var(--teal)" } }, "now") : null)),
+        `Week ${w.week}`, w.current ? h("span", { class: "count", style: { background: "var(--on-accent)", color: "var(--accent)" } }, "now") : null)),
       h("button", { role: "tab", "aria-selected": state.view === "term" ? "true" : "false", onclick: () => { state.view = "term"; refreshView(); } }, icon("chart"), "Term summary"));
     const body = h("div");
     const wk = h("div", { class: "row small muted" });
