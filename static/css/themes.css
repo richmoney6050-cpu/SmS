@@ -137,3 +137,6 @@ table.reg .wkhead { background: var(--grad); color: var(--on-accent); }
 
 .icon-btn .dot, .tabs .count { background: var(--crit-badge, #c81e1e); color: #fff; }
 .field .req, .req { color: var(--crit-ink); }
+
+/* Phones: show stat cards two across so the dashboard is compact */
+@media (max-width: 520px) { .g-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .g-stats .stat { padding: 12px; } }
